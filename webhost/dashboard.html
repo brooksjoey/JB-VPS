@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPS Dashboard</title>
+    <style>
+        :root {
+            --nord0: #2E3440;
+            --nord1: #3B4252;
+            --nord2: #434C5E;
+            --nord3: #4C566A;
+            --nord4: #D8DEE9;
+            --nord5: #E5E9F0;
+            --nord6: #ECEFF4;
+            --nord7: #8FBCBB;
+            --nord8: #88C0D0;
+            --nord9: #81A1C1;
+            --nord10: #5E81AC;
+            --nord11: #BF616A;
+            --nord12: #D08770;
+            --nord13: #EBCB8B;
+            --nord14: #A3BE8C;
+            --nord15: #B48EAD;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: var(--nord0);
+            color: var(--nord6);
+            line-height: 1.6;
+            padding: 0;
+            margin: 0;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background-color: var(--nord1);
+            padding: 20px;
+            border-bottom: 1px solid var(--nord3);
+            text-align: center;
+        }
+        
+        h1 {
+            color: var(--nord8);
+            font-size: 2.2rem;
+            margin-bottom: 10px;
+        }
+        
+        .last-updated {
+            color: var(--nord4);
+            font-size: 0.9rem;
+        }
+        
+        .tabs {
+            display: flex;
+            background-color: var(--nord1);
+            border-bottom: 1px solid var(--nord3);
+            overflow-x: auto;
+        }
+        
+        .tab {
+            padding: 15px 20px;
+            cursor: pointer;
+            background-color: var(--nord1);
+            color: var(--nord4);
+            border: none;
+            border-bottom: 3px solid transparent;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: all 0.3s;
+        }
+        
+        .tab:hover {
+            background-color: var(--nord2);
+            color: var(--nord6);
+        }
+        
+        .tab.active {
+            background-color: var(--nord0);
+            color: var(--nord8);
+            border-bottom: 3px solid var(--nord8);
+        }
+        
+        .tab-content {
+            display: none;
+            padding: 20px;
+            background-color: var(--nord0);
+        }
+        
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.5s;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .card {
+            background-color: var(--nord1);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .card h2 {
+            color: var(--nord7);
+            margin-bottom: 15px;
+            font-size: 1.4rem;
+            border-bottom: 1px solid var(--nord3);
+            padding-bottom: 10px;
+        }
+        
+        .card h3 {
+            color: var(--nord8);
+            margin: 15px 0 10px;
+            font-size: 1.1rem;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+        }
+        
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background-color: var(--nord2);
+            border-radius: 6px;
+        }
+        
+        .info-label {
+            font-weight: 500;
+            color: var(--nord5);
+        }
+        
+        .info-value {
+            font-family: 'Fira Code', monospace;
+            color: var(--nord6);
+            font-size: 0.95rem;
+        }
+        
+        .copy-btn {
+            background-color: var(--nord3);
+            color: var(--nord6);
+            border: none;
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            margin-left: 10px;
+            transition: background-color 0.3s;
+        }
+        
+        .copy-btn:hover {
+            background-color: var(--nord10);
+        }
+        
+        .status {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .status-online {
+            background-color: var(--nord14);
+            color: var(--nord0);
+        }
+        
+        .status-offline {
+            background-color: var(--nord11);
+            color: var(--nord6);
+        }
+        
+        .app-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+        }
+        
+        .app-item {
+            background-color: var(--nord2);
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .progress-bar {
+            height: 8px;
+            background-color: var(--nord3);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background-color: var(--nord14);
+            border-radius: 4px;
+        }
+        
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--nord4);
+            font-size: 0.9rem;
+            border-top: 1px solid var(--nord3);
+            margin-top: 30px;
+        }
+        
+        .refresh-btn {
+            background-color: var(--nord9);
+            color: var(--nord0);
+            border: none;
+            border-radius: 6px;
+            padding: 10px 15px;
+            cursor: pointer;
+            font-weight: 500;
+            margin: 10px 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .refresh-btn:hover {
+            background-color: var(--nord10);
+        }
+        
+        @media (max-width: 768px) {
+            .info-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .app-list {
+                grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            }
+            
+            .tab {
+                padding: 12px 15px;
+                font-size: 0.9rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>VPS Dashboard</h1>
+        <div class="last-updated" id="last-updated">Last updated: <span id="update-time">Loading...</span></div>
+    </header>
+    
+    <div class="tabs">
+        <button class="tab active" data-tab="overview">System Overview</button>
+        <button class="tab" data-tab="network">Network</button>
+        <button class="tab" data-tab="services">Services</button>
+        <button class="tab" data-tab="applications">Applications</button>
+        <button class="tab" data-tab="resources">Resources</button>
+    </div>
+    
+    <div class="container">
+        <button class="refresh-btn" id="refresh-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4C7.58 4 4.01 7.58 4.01 12C4.01 16.42 7.58 20 12 20C15.73 20 18.84 17.45 19.73 14H17.65C16.83 16.33 14.61 18 12 18C8.69 18 6 15.31 6 12C6 8.69 8.69 6 12 6C13.66 6 15.14 6.69 16.22 7.78L13 11H20V4L17.65 6.35Z" fill="currentColor"/>
+            </svg>
+            Refresh Data
+        </button>
+        
+        <div class="tab-content active" id="overview">
+            <div class="card">
+                <h2>System Information</h2>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">Hostname:</span>
+                        <span class="info-value" id="hostname">Loading...</span>
+                        <button class="copy-btn" data-copy="hostname">Copy</button>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">OS:</span>
+                        <span class="info-value" id="os">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Kernel:</span>
+                        <span class="info-value" id="kernel">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Uptime:</span>
+                        <span class="info-value" id="uptime">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Current User:</span>
+                        <span class="info-value" id="user">Loading...</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Hardware</h2>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">CPU Model:</span>
+                        <span class="info-value" id="cpu-model">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">CPU Cores:</span>
+                        <span class="info-value" id="cpu-cores">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Memory:</span>
+                        <span class="info-value" id="memory">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Disk Usage:</span>
+                        <span class="info-value" id="disk-usage">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="tab-content" id="network">
+            <div class="card">
+                <h2>Network Information</h2>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">Public IP:</span>
+                        <span class="info-value" id="public-ip">Loading...</span>
+                        <button class="copy-btn" data-copy="public-ip">Copy</button>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Private IP:</span>
+                        <span class="info-value" id="private-ip">Loading...</span>
+                        <button class="copy-btn" data-copy="private-ip">Copy</button>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Tailscale IP:</span>
+                        <span class="info-value" id="tailscale-ip">Loading...</span>
+                        <button class="copy-btn" data-copy="tailscale-ip">Copy</button>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Hostname:</span>
+                        <span class="info-value" id="network-hostname">Loading...</span>
+                        <button class="copy-btn" data-copy="network-hostname">Copy</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Open Ports</h2>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">SSH (22):</span>
+                        <span class="info-value"><span class="status status-online">Open</span></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">HTTP (80):</span>
+                        <span class="info-value"><span class="status status-online">Open</span></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">HTTPS (443):</span>
+                        <span class="info-value"><span class="status status-online">Open</span></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Custom (8080):</span>
+                        <span class="info-value"><span class="status status-online">Open</span></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="tab-content" id="services">
+            <div class="card">
+                <h2>Service Status</h2>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">SSH:</span>
+                        <span class="info-value"><span class="status status-online">Active</span></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Nginx:</span>
+                        <span class="info-value"><span class="status status-online">Active</span></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Fail2Ban:</span>
+                        <span class="info-value"><span class="status status-online">Active</span></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Tailscale:</span>
+                        <span class="info-value"><span class="status status-online">Active</span></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">UFW:</span>
+                        <span class="info-value"><span class="status status-online">Active</span></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Cron:</span>
+                        <span class="info-value"><span class="status status-online">Active</span></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="tab-content" id="applications">
+            <div class="card">
+                <h2>Installed Applications</h2>
+                <div class="app-list">
+                    <div class="app-item">Nginx <span class="status status-online">Installed</span></div>
+                    <div class="app-item">Tailscale <span class="status status-online">Installed</span></div>
+                    <div class="app-item">Fail2Ban <span class="status status-online">Installed</span></div>
+                    <div class="app-item">UFW <span class="status status-online">Installed</span></div>
+                    <div class="app-item">Python 3 <span class="status status-online">Installed</span></div>
+                    <div class="app-item">PHP <span class="status status-online">Installed</span></div>
+                    <div class="app-item">Node.js <span class="status status-online">Installed</span></div>
+                    <div class="app-item">Docker <span class="status status-offline">Not Installed</span></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="tab-content" id="resources">
+            <div class="card">
+                <h2>CPU Usage</h2>
+                <div class="info-item">
+                    <span class="info-label">Usage:</span>
+                    <span class="info-value" id="cpu-usage">Loading...</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="cpu-progress" style="width: 0%"></div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Memory Usage</h2>
+                <div class="info-item">
+                    <span class="info-label">Usage:</span>
+                    <span class="info-value" id="memory-usage">Loading...</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="memory-progress" style="width: 0%"></div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Disk Usage</h2>
+                <div class="info-item">
+                    <span class="info-label">Usage:</span>
+                    <span class="info-value" id="disk-usage-percent">Loading...</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="disk-progress" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <footer>
+        <p>VPS Dashboard &copy; 2025 | Auto-updates every 60 seconds</p>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Tab functionality
+            const tabs = document.querySelectorAll('.tab');
+            const tabContents = document.querySelectorAll('.tab-content');
+            
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const tabId = tab.getAttribute('data-tab');
+                    
+                    // Remove active class from all tabs and contents
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tabContents.forEach(c => c.classList.remove('active'));
+                    
+                    // Add active class to clicked tab and corresponding content
+                    tab.classList.add('active');
+                    document.getElementById(tabId).classList.add('active');
+                });
+            });
+            
+            // Copy button functionality
+            document.querySelectorAll('.copy-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const targetId = this.getAttribute('data-copy');
+                    const textToCopy = document.getElementById(targetId).textContent;
+                    
+                    navigator.clipboard.writeText(textToCopy).then(() => {
+                        const originalText = this.textContent;
+                        this.textContent = 'Copied!';
+                        
+                        setTimeout(() => {
+                            this.textContent = originalText;
+                        }, 2000);
+                    }).catch(err => {
+                        console.error('Failed to copy: ', err);
+                    });
+                });
+            });
+            
+            // Refresh button functionality
+            document.getElementById('refresh-btn').addEventListener('click', fetchSystemData);
+            
+            // Fetch system data initially and set interval
+            fetchSystemData();
+            setInterval(fetchSystemData, 60000); // Update every 60 seconds
+            
+            // Function to fetch system data
+            function fetchSystemData() {
+                // Update timestamp
+                document.getElementById('update-time').textContent = new Date().toLocaleTimeString();
+                
+                // In a real implementation, you would fetch this data from your server
+                // For now, we'll simulate the data with realistic values
+                
+                // System Info
+                document.getElementById('hostname').textContent = 'vps-main';
+                document.getElementById('os').textContent = 'Ubuntu 24.04 LTS';
+                document.getElementById('kernel').textContent = '5.15.0-91-generic';
+                document.getElementById('uptime').textContent = '15 days, 3:42:16';
+                document.getElementById('user').textContent = 'root';
+                
+                // Hardware Info
+                document.getElementById('cpu-model').textContent = 'Intel Xeon E5-2680 v4';
+                document.getElementById('cpu-cores').textContent = '2 vCPUs';
+                document.getElementById('memory').textContent = '4.0 GB / 8.0 GB';
+                document.getElementById('disk-usage').textContent = '28.5 GB / 80.0 GB';
+                
+                // Network Info
+                document.getElementById('public-ip').textContent = '129.212.185.141';
+                document.getElementById('private-ip').textContent = '10.0.0.5';
+                document.getElementById('tailscale-ip').textContent = '100.64.130.106';
+                document.getElementById('network-hostname').textContent = 'vps-main.example.com';
+                
+                // Resource Usage
+                const cpuUsage = Math.floor(Math.random() * 30) + 10; // Random between 10-40%
+                const memoryUsage = Math.floor(Math.random() * 20) + 60; // Random between 60-80%
+                const diskUsage = Math.floor(Math.random() * 10) + 35; // Random between 35-45%
+                
+                document.getElementById('cpu-usage').textContent = `${cpuUsage}%`;
+                document.getElementById('cpu-progress').style.width = `${cpuUsage}%`;
+                
+                document.getElementById('memory-usage').textContent = `${memoryUsage}%`;
+                document.getElementById('memory-progress').style.width = `${memoryUsage}%`;
+                
+                document.getElementById('disk-usage-percent').textContent = `${diskUsage}%`;
+                document.getElementById('disk-progress').style.width = `${diskUsage}%`;
+            }
+        });
+    </script>
+</body>
+</html>
