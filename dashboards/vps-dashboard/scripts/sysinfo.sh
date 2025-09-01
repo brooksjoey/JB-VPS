@@ -1,0 +1,1 @@
+#!/usr/bin/env bash\nset -euo pipefail\necho '{"placeholder":true}'\n

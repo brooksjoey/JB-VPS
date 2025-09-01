@@ -1,0 +1,1 @@
+[Unit]\nDescription=Generate sysinfo JSON for dashboard\n\n[Service]\nType=oneshot\nExecStart=/usr/local/bin/sysinfo-json > /var/www/html/vps-dashboard/data/sysinfo.json\n

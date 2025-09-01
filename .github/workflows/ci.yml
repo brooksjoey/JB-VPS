@@ -1,0 +1,1 @@
+name: JB-VPS CI\non: [push]\njobs:\n  shellcheck:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: ludeeus/action-shellcheck@v2\n

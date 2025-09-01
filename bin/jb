@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+JB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$JB_DIR/lib/base.sh"
+# Load every plugin (each should call jb_register)
+shopt -s nullglob
+for p in "$JB_DIR/plugins"/*/plugin.sh; do
+  source "$p"
+done
+shopt -u nullglob
+
+cmd="${1:-help}"; shift || true
+if [[ -z "${JB_CMDS_FUNC[$cmd]:-}" ]]; then
+  jb_help; exit 1
+fi
+"${JB_CMDS_FUNC[$cmd]}" "$@"

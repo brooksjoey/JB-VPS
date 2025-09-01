@@ -1,0 +1,1 @@
+[Unit]\nDescription=Refresh sysinfo JSON every 5s\n\n[Timer]\nOnUnitActiveSec=5s\nAccuracySec=1s\nUnit=sysinfo.service\n\n[Install]\nWantedBy=timers.target\n
