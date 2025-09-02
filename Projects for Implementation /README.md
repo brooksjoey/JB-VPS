@@ -3,3 +3,5 @@ THIS WILL BE A README.MD FILE FOR PROJECTS I’M IMPLEMENTING INTO THE JB-VPS AU
 CURRENT IMPLEMENTATIONS:
 
 1. Evilginx2 v3.4.1 Automation Suite
+2. ENV-REPO: A way to securely save my tokens, keys, configs, anything I have to simply have on file on my VPS.
+3. 
