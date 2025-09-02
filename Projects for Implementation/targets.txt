@@ -1,0 +1,26 @@
+# === WYNDHAM PROPERTIES TARGET LIST ===
+# Authorized Red Team Testing - Employee Email Addresses
+# Format: email@domain.com,FirstName,LastName,Title,Department,Priority
+
+# HIGH PRIORITY TARGETS (C-Level, IT, Security)
+john.smith@wyndhamhotels.com,John,Smith,IT Director,Information Technology,HIGH
+jane.doe@wyndhamhotels.com,Jane,Doe,CISO,Information Security,HIGH
+mike.johnson@wyndhamhotels.com,Mike,Johnson,CEO,Executive,HIGH
+
+# MEDIUM PRIORITY TARGETS (Management, HR, Finance)
+sarah.wilson@wyndhamhotels.com,Sarah,Wilson,HR Manager,Human Resources,MEDIUM
+david.brown@wyndhamhotels.com,David,Brown,CFO,Finance,MEDIUM
+lisa.davis@wyndhamhotels.com,Lisa,Davis,Operations Manager,Operations,MEDIUM
+
+# LOW PRIORITY TARGETS (General Staff)
+# Add additional targets here as discovered through reconnaissance
+
+# TEMPLATE ENTRIES (Remove before campaign)
+# firstname.lastname@wyndhamhotels.com,First,Last,Title,Department,PRIORITY
+
+# NOTES:
+# - Validate email addresses before campaign launch
+# - Use LinkedIn reconnaissance to populate this list
+# - Prioritize based on access levels and business impact
+# - Remove template entries and comments before going live
+# - Maximum 50 targets per campaign for controlled testing

