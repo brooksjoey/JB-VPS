@@ -38,13 +38,22 @@ declare -A LOG_COLORS=(
 log_init() {
     local log_dir="${1:-${LOG_DIR:-/var/log/jb-vps}}"
     
-    # Create log directory if it doesn't exist
+    # Create or select log directory
     if [[ ! -d "$log_dir" ]]; then
         if [[ $EUID -eq 0 ]]; then
             mkdir -p "$log_dir"
             chmod 750 "$log_dir"
         else
             # Use user's home directory if not root
+            LOG_DIR="${HOME:-/tmp}/.jb-vps/logs"
+            LOG_FILE="$LOG_DIR/jb-vps.log"
+            AUDIT_FILE="$LOG_DIR/audit.log"
+            ERROR_FILE="$LOG_DIR/error.log"
+            mkdir -p "$LOG_DIR"
+        fi
+    else
+        # Directory exists; if not writable and not root, fall back to home logs
+        if [[ $EUID -ne 0 && ! -w "$log_dir" ]]; then
             LOG_DIR="${HOME:-/tmp}/.jb-vps/logs"
             LOG_FILE="$LOG_DIR/jb-vps.log"
             AUDIT_FILE="$LOG_DIR/audit.log"
@@ -69,8 +78,8 @@ log_write() {
     local metadata="${4:-}"
     
     # Check if log level is enabled
-    local current_level_num="${LOG_LEVELS[${LOG_LEVEL:-INFO}]:-2}"
-    local message_level_num="${LOG_LEVELS[${level:-INFO}]:-2}"
+    local current_level_num="${LOG_LEVELS["${LOG_LEVEL:-INFO}"]:-2}"
+    local message_level_num="${LOG_LEVELS["${level:-INFO}"]:-2}"
     
     if [[ $message_level_num -lt $current_level_num ]]; then
         return 0
@@ -101,8 +110,8 @@ log_write() {
     
     # Console output with colors (if terminal supports it)
     if [[ -t 1 ]]; then
-        local color="${LOG_COLORS[${level}]:-}"
-        local reset="${LOG_COLORS[RESET]:-}"
+        local color="${LOG_COLORS["${level}"]:-}"
+        local reset="${LOG_COLORS["RESET"]:-}"
         printf "%b[%s] [%s] %s%b\n" "${color:-}" "${level}" "${component}" "${message}" "${reset:-}"
     else
         printf "[%s] [%s] %s\n" "${level}" "${component}" "${message}"

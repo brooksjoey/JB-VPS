@@ -390,6 +390,7 @@ show_monitoring_menu() {
         echo -e "${MENU_OPTION}2)${MENU_RESET} See what's using CPU and memory"
         echo -e "${MENU_OPTION}3)${MENU_RESET} Check running services"
         echo -e "${MENU_OPTION}4)${MENU_RESET} View recent errors"
+        echo -e "${MENU_OPTION}5)${MENU_RESET} View Mnemosyneos log"
         
         show_standard_options
         
@@ -400,6 +401,7 @@ show_monitoring_menu() {
             2) run_area_script "monitoring" "resources" ;;
             3) run_area_script "monitoring" "services" ;;
             4) run_area_script "monitoring" "errors" ;;
+            5) with_preview "View Mnemosyneos log" "$JB_DIR/mnemosyneos/memory.sh" view ;;
             0|"0") show_readme ;;
             p|P) show_preview ;;
             b|B) return ;;
