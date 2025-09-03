@@ -74,6 +74,23 @@ jb_register() {
 }
 
 # Enhanced help system with categories
+
+# Register a command with the system
+register_command() {
+    local command_name="$1"
+    local description="$2"
+    local function_name="$3"
+    local plugin_name="${4:-core}"
+    
+    if [[ -z "$command_name" || -z "$function_name" ]]; then
+        log_error "register_command: missing required arguments" "REGISTRY"
+        return 1
+    fi
+    
+    # Store command registration
+    JB_REGISTERED_COMMANDS["$command_name"]="$function_name:$description:$plugin_name"
+    log_debug "Registered command: $command_name -> $function_name" "REGISTRY"
+}
 jb_help() {
     local category="${1:-all}"
     
@@ -654,7 +671,7 @@ pkg_install() {
 }
 
 # Export enhanced functions
-export -f jb_register jb_help log log_info log_warn log_error log_debug
+export -f jb_register jb_help register_command log log_info log_warn log_error log_debug
 export -f need as_root detect_os pkg_install get_system_info
 export -f jb_config_get jb_config_set jb_execute jb_state_get jb_state_set
 export -f jb_error_handler jb_cleanup source_lib backup_file with_preview
