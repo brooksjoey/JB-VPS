@@ -350,16 +350,47 @@ core_config() {
     esac
 }
 
-# Register core commands with categories
-jb_register "bootstrap" core_bootstrap "Bootstrap/initialize a fresh VPS" "core"
-jb_register "init" core_init "Alias for bootstrap command" "core"
-jb_register "harden" core_harden "Apply security hardening measures" "security"
+# Self-update functionality
+core_self_update() {
+    log_info "Updating JB-VPS to latest version" "CORE"
+    
+    local current_dir="$PWD"
+    cd "$JB_DIR"
+    
+    # Check if we're in a git repository
+    if [[ -d ".git" ]]; then
+        log_info "Pulling latest changes from git repository" "CORE"
+        git fetch origin
+        git pull origin main || git pull origin master
+        
+        # Re-link the jb command
+        if [[ -f "/usr/local/bin/jb" ]]; then
+            log_info "Re-linking jb command" "CORE"
+            as_root ln -sf "$JB_DIR/bin/jb" "/usr/local/bin/jb"
+        fi
+        
+        log_info "JB-VPS updated successfully" "CORE"
+    else
+        log_warn "Not in a git repository, cannot auto-update" "CORE"
+        log_info "To update manually, re-run the installer from the latest code" "CORE"
+    fi
+    
+    cd "$current_dir"
+}
+
+# Register core commands with categories (matching CLINE spec)
+jb_register "init" core_bootstrap "Full everyday setup on a fresh VPS" "core"
+jb_register "self:update" core_self_update "Pull latest and re-link" "core"
+jb_register "harden" core_harden "Apply security hardening (optional)" "security"
 jb_register "info" core_info "Display detailed system information" "system"
 jb_register "status" core_status "Show comprehensive system status" "system"
 jb_register "maintenance" core_maintenance "Perform system maintenance tasks" "maintenance"
 jb_register "monitor" core_monitor "Monitor system health (use --daemon for background)" "monitoring"
 jb_register "install" core_install "Install system packages" "system"
 jb_register "config" core_config "Manage JB-VPS configuration" "config"
+
+# Legacy aliases for backward compatibility
+jb_register "bootstrap" core_bootstrap "Bootstrap/initialize a fresh VPS (legacy)" "core"
 
 # Initialize core plugin
 core_plugin_init

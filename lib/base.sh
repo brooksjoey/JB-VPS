@@ -435,8 +435,228 @@ if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
     jb_init
 fi
 
+# Enhanced backup functionality with rotation
+backup_file() {
+    local file="$1"
+    local max_backups="${2:-5}"
+    
+    if [[ ! -f "$file" ]]; then
+        log_debug "File $file does not exist, skipping backup" "BACKUP"
+        return 0
+    fi
+    
+    local backup_dir
+    backup_dir="$(dirname "$file")/.backups"
+    mkdir -p "$backup_dir"
+    
+    local basename
+    basename="$(basename "$file")"
+    local timestamp
+    timestamp="$(date +%Y%m%d_%H%M%S)"
+    local backup_file="$backup_dir/${basename}.${timestamp}.bak"
+    
+    cp "$file" "$backup_file"
+    log_info "Backed up $file to $backup_file" "BACKUP"
+    
+    # Rotate old backups
+    local backup_count
+    backup_count=$(find "$backup_dir" -name "${basename}.*.bak" | wc -l)
+    
+    if [[ $backup_count -gt $max_backups ]]; then
+        local to_remove=$((backup_count - max_backups))
+        find "$backup_dir" -name "${basename}.*.bak" -type f -printf '%T@ %p\n' | \
+            sort -n | head -n "$to_remove" | cut -d' ' -f2- | \
+            xargs rm -f
+        log_debug "Rotated old backups, removed $to_remove files" "BACKUP"
+    fi
+    
+    echo "$backup_file"
+}
+
+# Preview functionality for actions
+with_preview() {
+    local description="$1"
+    shift
+    
+    echo "=== PREVIEW ==="
+    echo "Action: $description"
+    echo "Command: $*"
+    echo ""
+    
+    if [[ "${JB_AUTO_APPROVE:-false}" == "true" ]]; then
+        log_info "Auto-approving: $description" "PREVIEW"
+        "$@"
+        return $?
+    fi
+    
+    read -p "Proceed with this action? [y/N] " -n 1 -r
+    echo
+    
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        "$@"
+    else
+        log_info "Action cancelled by user" "PREVIEW"
+        return 1
+    fi
+}
+
+# Idempotent file editing helpers
+file_contains() {
+    local file="$1"
+    local pattern="$2"
+    
+    [[ -f "$file" ]] && grep -q "$pattern" "$file"
+}
+
+file_append_once() {
+    local file="$1"
+    local content="$2"
+    local marker="${3:-$content}"
+    
+    if ! file_contains "$file" "$marker"; then
+        backup_file "$file"
+        echo "$content" >> "$file"
+        log_info "Added content to $file" "FILE"
+        return 0
+    else
+        log_debug "Content already exists in $file" "FILE"
+        return 1
+    fi
+}
+
+file_replace_once() {
+    local file="$1"
+    local search="$2"
+    local replace="$3"
+    
+    if file_contains "$file" "$search"; then
+        backup_file "$file"
+        sed -i "s|$search|$replace|g" "$file"
+        log_info "Replaced content in $file" "FILE"
+        return 0
+    else
+        log_debug "Search pattern not found in $file" "FILE"
+        return 1
+    fi
+}
+
+# Systemd helpers
+systemd_enable_start() {
+    local service="$1"
+    
+    if systemctl is-enabled "$service" >/dev/null 2>&1; then
+        log_debug "Service $service already enabled" "SYSTEMD"
+    else
+        as_root systemctl enable "$service"
+        log_info "Enabled service $service" "SYSTEMD"
+    fi
+    
+    if systemctl is-active "$service" >/dev/null 2>&1; then
+        log_debug "Service $service already running" "SYSTEMD"
+    else
+        as_root systemctl start "$service"
+        log_info "Started service $service" "SYSTEMD"
+    fi
+}
+
+systemd_disable_stop() {
+    local service="$1"
+    
+    if systemctl is-active "$service" >/dev/null 2>&1; then
+        as_root systemctl stop "$service"
+        log_info "Stopped service $service" "SYSTEMD"
+    fi
+    
+    if systemctl is-enabled "$service" >/dev/null 2>&1; then
+        as_root systemctl disable "$service"
+        log_info "Disabled service $service" "SYSTEMD"
+    fi
+}
+
+# Rollback functionality
+jb_rollback() {
+    local file="$1"
+    local backup_dir
+    backup_dir="$(dirname "$file")/.backups"
+    local basename
+    basename="$(basename "$file")"
+    
+    if [[ ! -d "$backup_dir" ]]; then
+        log_error "No backup directory found for $file" "ROLLBACK"
+        return 1
+    fi
+    
+    local latest_backup
+    latest_backup=$(find "$backup_dir" -name "${basename}.*.bak" -type f -printf '%T@ %p\n' | \
+        sort -n | tail -1 | cut -d' ' -f2-)
+    
+    if [[ -z "$latest_backup" ]]; then
+        log_error "No backup found for $file" "ROLLBACK"
+        return 1
+    fi
+    
+    log_info "Rolling back $file from $latest_backup" "ROLLBACK"
+    cp "$latest_backup" "$file"
+    log_audit "ROLLBACK" "$file" "SUCCESS" "backup=$latest_backup"
+}
+
+# Enhanced package management with OS detection
+pkg_install() {
+    local packages=("$@")
+    local os
+    os="$(detect_os)"
+    
+    log_info "Installing packages: ${packages[*]}" "PKG"
+    log_audit "PKG_INSTALL" "${packages[*]}" "ATTEMPT" "os=$os"
+    
+    # Validate package names
+    for pkg in "${packages[@]}"; do
+        if command -v validate_safe_filename >/dev/null 2>&1; then
+            if ! validate_safe_filename "$pkg" "package name"; then
+                log_error "Invalid package name: $pkg" "PKG"
+                return 1
+            fi
+        fi
+    done
+    
+    local start_time
+    start_time=$(date +%s.%N)
+    
+    case "$os" in
+        debian|ubuntu)
+            as_root apt-get update -y || return 1
+            as_root apt-get install -y "${packages[@]}" || return 1
+            ;;
+        fedora)
+            as_root dnf install -y "${packages[@]}" || return 1
+            ;;
+        centos|rhel)
+            as_root yum install -y "${packages[@]}" || return 1
+            ;;
+        arch)
+            as_root pacman -Sy --noconfirm "${packages[@]}" || return 1
+            ;;
+        *)
+            log_error "Unsupported OS for package installation: $os" "PKG"
+            return 1
+            ;;
+    esac
+    
+    local end_time
+    end_time=$(date +%s.%N)
+    
+    if command -v log_performance >/dev/null 2>&1; then
+        log_performance "pkg_install" "$start_time" "$end_time" "packages=${#packages[@]},os=$os"
+    fi
+    
+    log_audit "PKG_INSTALL" "${packages[*]}" "SUCCESS" "os=$os"
+    log_info "Package installation completed successfully" "PKG"
+}
+
 # Export enhanced functions
 export -f jb_register jb_help log log_info log_warn log_error log_debug
 export -f need as_root detect_os pkg_install get_system_info
 export -f jb_config_get jb_config_set jb_execute jb_state_get jb_state_set
-export -f jb_error_handler jb_cleanup source_lib
+export -f jb_error_handler jb_cleanup source_lib backup_file with_preview
+export -f file_contains file_append_once file_replace_once
+export -f systemd_enable_start systemd_disable_stop jb_rollback
