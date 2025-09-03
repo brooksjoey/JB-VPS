@@ -29,7 +29,12 @@ menu_web_domain() {
 }
 
 menu_web_simple() {
-  with_preview "Host a simple website" echo "Not yet implemented"
+  # Prompt for domain (basic prompt, default example.local)
+  local domain
+  read -rp "Enter domain (default: example.local): " domain || true
+  domain=${domain:-example.local}
+  # Use with_preview to show the exact CLI invocation
+  with_preview "Host a simple website" "$JB_DIR/bin/jb" webhost:setup --server nginx --domain "$domain"
 }
 
 menu_web_manage() {
@@ -70,4 +75,3 @@ web_menu() {
     esac
   done
 }
-
