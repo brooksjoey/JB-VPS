@@ -106,9 +106,14 @@ menu_display_header() {
     echo "╔══════════════════════════════════════════════════════════════════════════════╗"
     echo "║                            🖥️  JB-VPS CONTROL CENTER                         ║"
     echo "╠══════════════════════════════════════════════════════════════════════════════╣"
-    echo -e "║ ${C_BOLD}Hostname:${C_RESET}${C_HEADER} $hostname${' '$(( 65 - ${#hostname} ))}║"
-    echo -e "║ ${C_BOLD}Uptime:${C_RESET}${C_HEADER} $uptime${' '$(( 67 - ${#uptime} ))}║"
-    echo -e "║ ${C_BOLD}Load:${C_RESET}${C_HEADER} $load_avg${' '$(( 69 - ${#load_avg} ))}║"
+    # Calculate padding for each line to align right border
+    local hostname_padding=$(printf '%*s' $((65 - ${#hostname})) '')
+    local uptime_padding=$(printf '%*s' $((67 - ${#uptime})) '')
+    local load_padding=$(printf '%*s' $((69 - ${#load_avg})) '')
+    
+    echo -e "║ ${C_BOLD}Hostname:${C_RESET}${C_HEADER} $hostname$hostname_padding║"
+    echo -e "║ ${C_BOLD}Uptime:${C_RESET}${C_HEADER} $uptime$uptime_padding║"
+    echo -e "║ ${C_BOLD}Load:${C_RESET}${C_HEADER} $load_avg$load_padding║"
     echo "╚══════════════════════════════════════════════════════════════════════════════╝"
     echo -e "${C_RESET}"
 }

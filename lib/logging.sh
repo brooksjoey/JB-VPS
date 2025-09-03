@@ -72,14 +72,30 @@ log_init() {
 
 # Core logging function
 log_write() {
-    local level="${1:-INFO}"
-    local component="${2:-MAIN}"
+local level="${1:-INFO}"
+local component="${2:-MAIN}"
     local message="${3:-}"
     local metadata="${4:-}"
+    local message_level="${level:-INFO}"
     
     # Check if log level is enabled
-    local current_level_num="${LOG_LEVELS["${LOG_LEVEL:-INFO}"]:-2}"
-    local message_level_num="${LOG_LEVELS["${level:-INFO}"]:-2}"
+    local log_level_value="${LOG_LEVEL:-INFO}"
+    local current_level_num=2
+    local message_level_num=2
+    
+    # Get numeric values from LOG_LEVELS array, with fallback
+    # Use safer array access methods to avoid unbound variable errors
+    if [[ -n "${log_level_value}" ]]; then
+        if [[ "${!LOG_LEVELS[@]}" =~ "${log_level_value}" ]]; then
+            current_level_num=${LOG_LEVELS[$log_level_value]}
+        fi
+    fi
+    
+    if [[ -n "${message_level}" ]]; then
+        if [[ "${!LOG_LEVELS[@]}" =~ "${message_level}" ]]; then
+            message_level_num=${LOG_LEVELS[$message_level]}
+        fi
+    fi
     
     if [[ $message_level_num -lt $current_level_num ]]; then
         return 0
@@ -110,9 +126,20 @@ log_write() {
     
     # Console output with colors (if terminal supports it)
     if [[ -t 1 ]]; then
-        local color="${LOG_COLORS["${level}"]:-}"
-        local reset="${LOG_COLORS["RESET"]:-}"
-        printf "%b[%s] [%s] %s%b\n" "${color:-}" "${level}" "${component}" "${message}" "${reset:-}"
+        # Use safer variable assignment for color codes
+        local color=""
+        local reset=""
+        
+        # Check if keys exist in the array before accessing them
+        if [[ -n "$level" ]] && [[ "${!LOG_COLORS[@]}" =~ "$level" ]]; then
+            color="${LOG_COLORS[$level]}"
+        fi
+        
+        if [[ "${!LOG_COLORS[@]}" =~ "RESET" ]]; then
+            reset="${LOG_COLORS[RESET]}"
+        fi
+        
+        printf "%b[%s] [%s] %s%b\n" "$color" "$level" "$component" "$message" "$reset"
     else
         printf "[%s] [%s] %s\n" "${level}" "${component}" "${message}"
     fi

@@ -1,0 +1,65 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "created": "2025-09-03T09:11:14+00:00",
+    "last_updated": "2025-09-03T09:11:14+00:00",
+    "total_articles": 4,
+    "categories": {}
+  },
+  "articles": [
+    {
+      "id": "vps-basics",
+      "title": "VPS Management Basics",
+      "category": "system_administration",
+      "content": "A VPS (Virtual Private Server) is a virtualized server that provides dedicated resources within a shared physical server. Key management tasks include system updates, security hardening, monitoring, and backup management.",
+      "tags": [
+        "vps",
+        "basics",
+        "administration"
+      ],
+      "created": "2025-09-03T09:11:14+00:00",
+      "importance": 9
+    },
+    {
+      "id": "security-hardening",
+      "title": "Security Hardening Best Practices",
+      "category": "security",
+      "content": "Essential security measures include: disabling root login, using SSH keys, configuring fail2ban, setting up UFW firewall, regular updates, and monitoring system logs.",
+      "tags": [
+        "security",
+        "hardening",
+        "best-practices"
+      ],
+      "created": "2025-09-03T09:11:14+00:00",
+      "importance": 10
+    },
+    {
+      "id": "ssh-management",
+      "title": "SSH Key Management",
+      "category": "security",
+      "content": "SSH keys provide secure authentication. Generate with ssh-keygen, copy with ssh-copy-id, and manage authorized_keys file. Disable password authentication after key setup.",
+      "tags": [
+        "ssh",
+        "keys",
+        "authentication"
+      ],
+      "created": "2025-09-03T09:11:14+00:00",
+      "importance": 8
+    },
+    {
+      "id": "monitoring-basics",
+      "title": "System Monitoring Fundamentals",
+      "category": "system_administration",
+      "content": "Monitor CPU, memory, disk usage, and network. Use tools like htop, iotop, netstat. Set up alerts for critical thresholds. Log analysis is crucial for troubleshooting.",
+      "tags": [
+        "monitoring",
+        "performance",
+        "troubleshooting"
+      ],
+      "created": "2025-09-03T09:11:14+00:00",
+      "importance": 7
+    }
+  ],
+  "tags": [],
+  "references": []
+}

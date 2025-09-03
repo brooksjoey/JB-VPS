@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-JB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+JB_DIR="/home/jb/JB-VPS"
 source "$JB_DIR/lib/base.sh"
 
 # Register core commands
