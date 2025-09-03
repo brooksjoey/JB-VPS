@@ -453,7 +453,7 @@ validate_no_shell_injection() {
         "&"
         "|"
         "\$("
-        "`"
+        "\`"
         ">"
         "<"
         "*"

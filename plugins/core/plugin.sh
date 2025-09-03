@@ -86,7 +86,7 @@ core_info() {
         as_root "$JB_DIR/dashboards/vps-dashboard/scripts/sysinfo.sh"
     else
         echo "{}" | jq -c --arg host "$(hostname)" --arg kern "$(uname -r)" \
-          --arg os "$(grep PRETTY_NAME /etc/os-release 2>/dev/null|cut -d= -f2|tr -d \")" \
+          --arg os "$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')" \
           ". + {hostname:\$host, os:{pretty:\$os}, kernel:\$kern}"
     fi
 }
@@ -102,7 +102,7 @@ core_status() {
     # Basic system info
     echo "📋 System Information:"
     echo "  Hostname: $(hostname)"
-    echo "  OS: $(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d \"" || echo "Unknown")"
+    echo "  OS: $(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' )"
     echo "  Kernel: $(uname -r)"
     echo "  Architecture: $(uname -m)"
     echo "  Uptime: $(uptime -p 2>/dev/null || uptime)"
