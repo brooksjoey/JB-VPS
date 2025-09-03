@@ -24,7 +24,7 @@ Core functionality areas (all with breadcrumbs, previews, and "What is this?" do
  • Files & Backups — Disk usage, backup plans, restore operations
  • Users & Access — Add users, SSH keys, admin rights, security settings
  • Monitoring & Health — System status, resource usage, logs, errors
- • Developer Tools — Repo deployment, code workspaces, environments
+ • Developer Tools — Repo deployment, code workspaces, environments, snapshot & push
 
 From every menu you can:
  • Preview exactly what each action will do before running it
@@ -59,6 +59,9 @@ Help:
 
 jb help
 
+Developer tools:
+
+jb repo:snapshot   # Snapshot & push repository changes
 
 ⸻
 
