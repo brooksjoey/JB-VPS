@@ -65,33 +65,43 @@ install_deps() {
     log_success "Dependencies installed successfully"
 }
 
-# Set up JB launcher
+# Set up JB launcher as a symlink for idempotence
 setup_launcher() {
     local repo_dir="$1"
     local launcher_path="/usr/local/bin/jb"
-    
+
     log "Setting up jb launcher at $launcher_path"
-    
-    # Create the launcher script
-    sudo tee "$launcher_path" > /dev/null << EOF
-#!/usr/bin/env bash
-# JB-VPS Launcher
-export JB_DIR="$repo_dir"
-exec "\$JB_DIR/bin/jb" "\$@"
-EOF
-    
-    sudo chmod +x "$launcher_path"
-    log_success "Launcher created at $launcher_path"
+
+    # If a regular file exists, replace it with a symlink
+    if [[ -e "$launcher_path" && ! -L "$launcher_path" ]]; then
+        log_warn "Existing non-symlink at $launcher_path found; replacing with symlink"
+        sudo rm -f "$launcher_path"
+    fi
+
+    # Create or update the symlink if needed
+    if [[ -L "$launcher_path" ]]; then
+        local target
+        target="$(readlink -f "$launcher_path" 2>/dev/null || true)"
+        if [[ "$target" == "$repo_dir/bin/jb" ]]; then
+            log_success "Launcher already points to $target"
+        else
+            sudo ln -sf "$repo_dir/bin/jb" "$launcher_path"
+            log_success "Updated launcher symlink to $repo_dir/bin/jb"
+        fi
+    else
+        sudo ln -s "$repo_dir/bin/jb" "$launcher_path"
+        log_success "Created launcher symlink -> $repo_dir/bin/jb"
+    fi
 }
 
-# Set up environment
+# Set up environment (exports JB_DIR via /etc/profile.d/jb-dir.sh)
 setup_environment() {
     local repo_dir="$1"
     
     log "Setting up environment variables"
     
     # Create profile.d script for system-wide JB_DIR
-    sudo tee /etc/profile.d/jb-vps.sh > /dev/null << EOF
+    sudo tee /etc/profile.d/jb-dir.sh > /dev/null << EOF
 # JB-VPS Environment
 export JB_DIR="$repo_dir"
 EOF
@@ -99,10 +109,10 @@ EOF
     # Also add to current shell
     export JB_DIR="$repo_dir"
     
-    log_success "Environment configured"
+    log_success "Environment configured (/etc/profile.d/jb-dir.sh)"
 }
 
-# Create necessary directories
+# Create necessary directories for logs/state/config
 setup_directories() {
     log "Creating system directories"
     
@@ -113,6 +123,11 @@ setup_directories() {
     # Create state directory
     sudo mkdir -p /var/lib/jb-vps
     sudo chmod 755 /var/lib/jb-vps
+    # Ensure state file exists with sane perms (idempotent)
+    if [[ ! -f /var/lib/jb-vps/jb-vps.state ]]; then
+        sudo touch /var/lib/jb-vps/jb-vps.state
+        sudo chmod 644 /var/lib/jb-vps/jb-vps.state || true
+    fi
     
     # Create config directory in repo
     mkdir -p "$JB_DIR/config"
@@ -160,7 +175,7 @@ main() {
     # Create directories
     setup_directories
     
-    # Make bin/jb executable
+    # Ensure bin/jb is executable
     chmod +x "$repo_dir/bin/jb"
     
     log_success "JB-VPS installation completed!"
