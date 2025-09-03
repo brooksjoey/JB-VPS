@@ -1,0 +1,226 @@
+Awesome — I blended everything into one clean, high-quality prompt you can paste straight into Cline (or any IDE AI). It’s written in plain language, de-duplicated, and prioritized so you get a functionality-first, menu-driven toolkit that boots on a fresh VPS with one command.
+
+⸻
+
+Cline Prompt — JB-VPS
+
+Role
+You are my IDE AI. Take the JB-VPS repository and turn it into a functionality-first, menu-driven toolkit that runs on any common Linux VPS with a single command. Use plain language everywhere. From every menu, I must be able to open the README for the current area.
+
+Big Picture (what I should end up with)
+	•	Clone → run one installer → land in a simple, friendly menu.
+	•	From the menu, control apps/services, databases, websites/domains, files/backups, users/access, monitoring/health, and developer tools.
+	•	Persistent memory is provided by MnemosyneOS.
+	•	Security hardening is available, but not the focus and never blocks normal flows.
+
+⸻
+
+✅ Primary goals (do these first)
+
+1) Single entrypoint + installer
+	•	Add a top-level install.sh that:
+	•	Detects distro via /etc/os-release.
+	•	Installs core deps: bash curl git gpg jq tar sudo (and lsb-release if useful).
+	•	Places a jb launcher in /usr/local/bin pointing to repo bin/jb.
+	•	Sets and persists JB_DIR to the repo root.
+	•	Create bin/jb that:
+	•	Sources lib/base.sh.
+	•	Auto-loads plugins/*/plugin.sh.
+	•	Routes subcommands (e.g., env:list, webhost:setup, etc.).
+
+2) Functionality-first, plain-English menus (+ README everywhere)
+	•	Add bin/menu.sh (text UI). Menus must:
+	•	Show a breadcrumb at top: You are here: Home ▸ Websites & domains.
+	•	Use layman’s terms, not admin jargon.
+	•	Always include:
+	•	0) What is this? → opens the README.md for that area (auto-generate a friendly stub if missing).
+	•	P) Preview → prints a human summary (“What will this do?”) before running anything.
+	•	B) Back and Q) Quit.
+	•	Organize functional areas under areas/ (each area has its own README.md and menu.sh that wires choices → scripts/ or plugin functions):
+	•	areas/core/, areas/apps/, areas/databases/, areas/web/, areas/files/,
+areas/users/, areas/monitoring/, areas/devtools/.
+
+3) Idempotency + friendly previews
+	•	Every action supports --preview to print exactly what will happen.
+	•	Safe to re-run: no duplicate edits; if already configured, print: “Already set up, nothing to change.”
+	•	Provide backup_file helper that rotates timestamped backups (keep MAX_BACKUPS=5).
+
+4) OS support matrix
+	•	In lib/base.sh, add pkg_install() that branches for apt (Debian/Ubuntu), dnf (Fedora), pacman (Arch).
+	•	Document support in README: Ubuntu/Debian = primary; Fedora/Arch = best-effort.
+
+5) Encrypted profiles UX
+	•	jb env:list shows available profiles from secure/environments/*.env.gpg.
+	•	jb env:open <name> decrypts to a root-only temp file, exports vars for current shell/session, then wipes on exit.
+
+6) Top-level README that tells the story
+	•	Include: Quickstart (one-line install), capabilities, plugin catalog, supported distros, the functionality-first philosophy, brief safety statement, and how to use the menus.
+
+Note: Security hardening remains available as an optional action (“Improve security settings”), but is not a default path and must never block regular tasks.
+
+⸻
+
+🧩 Information architecture (menu labels must match exactly)
+
+Home
+	1.	Set up this server for my work
+	2.	Apps & services
+	3.	Databases
+	4.	Websites & domains
+	5.	Files & backups
+	6.	Users & access
+	7.	Monitoring & health
+	8.	Developer tools
+B) Back   Q) Quit   0) What is this?
+
+Apps & services
+	1.	List installed apps
+	2.	Add a new app
+	3.	Start/Stop/Restart an app
+	4.	Turn an app on/off at startup
+B/Q/0 as above
+
+Databases
+	1.	Install a database (PostgreSQL/MySQL/SQLite)
+	2.	Create a database and user
+	3.	Back up a database
+	4.	Restore a backup
+B/Q/0 as above
+
+Websites & domains
+	1.	Point a domain to this server
+	2.	Host a simple website
+	3.	Add or remove a site
+	4.	Show where site files live
+B/Q/0 as above
+
+Files & backups
+	1.	Show disk space
+	2.	Create a backup plan
+	3.	Run a backup now
+	4.	Restore files from backup
+B/Q/0 as above
+
+Users & access
+	1.	Add a user
+	2.	Give or remove admin rights
+	3.	Set up SSH keys
+	4.	Turn password login on/off
+B/Q/0 as above
+
+Monitoring & health
+	1.	Show system status
+	2.	See what’s using CPU and memory
+	3.	Check running services
+	4.	View recent errors
+B/Q/0 as above
+
+Developer tools
+	1.	Install common developer tools
+	2.	Set up a code workspace
+	3.	Pull a repo and run it
+B/Q/0 as above
+
+⸻
+
+🛠 Command surface (CLI; menus show plain labels)
+	•	jb init — full everyday setup on a fresh VPS.
+	•	jb env:list — list encrypted env profiles.
+	•	jb env:open <name> — decrypt & load a profile for this shell.
+	•	jb webhost:setup — install web server + host a simple site.
+	•	jb dashboard:install — install the VPS dashboard.
+	•	jb self:update — pull latest and re-link.
+	•	jb help — command index.
+	•	(Optional) jb harden — available but not emphasized.
+
+⸻
+
+📦 Files to add / update (use these exact paths)
+	•	install.sh — one-shot installer (distro detection, deps, symlink /usr/local/bin/jb).
+	•	bin/jb — thin launcher that loads lib/base.sh and plugins.
+	•	bin/menu.sh — main text UI (breadcrumb, 0/P/B/Q, previews).
+	•	lib/base.sh — command registry, logging, OS detection, pkg_install, backup_file, with_preview, helpers for idempotent file edits/systemd.
+	•	plugins/core/plugin.sh — init, self:update, (optional) harden.
+	•	plugins/env/plugin.sh — env:list, env:open, optional env:write.
+	•	plugins/webhost/plugin.sh, plugins/dashboard/plugin.sh — wire to scripts.
+	•	areas/*/menu.sh — per-area menus that call scripts.
+	•	scripts/ — tiny, composable implementation scripts called by menus/plugins.
+	•	profiles/ — minimal, dev, webhost (optional).
+	•	services/ — systemd unit templates (optional).
+	•	.github/workflows/ci.yml — shellcheck + bats.
+	•	Makefile — tasks.
+	•	README.md (root) + areas/*/README.md — friendly guides.
+
+⸻
+
+🧪 Behavior & UX (acceptance criteria)
+	•	Plain English: Labels match what happens; no jargon.
+	•	Breadcrumb at top of every menu.
+	•	README access: 0) What is this? opens the current area’s README; if missing, auto-generate a clear stub (what the area does, common tasks, where files/logs live).
+	•	Preview before run: P) or --preview shows a bullet summary of the exact actions and files to be touched; user confirms before proceeding.
+	•	Safe re-runs: If there’s nothing to do, say “Already set up, nothing to change.”
+	•	Logs & state: All actions log to /var/log/jb-vps; durable state in /var/lib/jb-vps.
+	•	Exit codes: Non-zero only on real failure; print a helpful message and where to check logs.
+	•	Distro awareness: pkg_install handles apt/dnf/pacman; README documents support matrix.
+
+⸻
+
+📚 Secondary quality goals
+	•	Makefile targets: install, update, lint, test, clean.
+	•	CI (GitHub Actions): run shellcheck and a few bats tests for lib/base.sh + one menu flow.
+	•	Standardize paths: LOG_DIR=/var/log/jb-vps, STATE_DIR=/var/lib/jb-vps (create if missing).
+	•	Config schema: provide .env.example with documented variables; validate required keys before running.
+	•	Rollback helper: jb rollback <file> restores a previous timestamped backup.
+
+⸻
+
+🌟 Nice-to-haves (time permitting)
+	•	Dashboard polish: simple static dashboard (nginx or caddy) showing OS, kernel, uptime, disk/mem, SSH status, failed units, last jb run.
+	•	Profiles: profiles/minimal, profiles/dev, profiles/webhost chosen via JB_PROFILE or menu.
+	•	Ansible compatibility: optional playbooks that call these scripts for scale.
+
+⸻
+
+🧱 Seed content (scaffolds to generate)
+	•	Minimal areas/*/README.md for each area with:
+	•	“What this area is for”, “Common things you can do here”, “What each menu choice will do”, “Where files will be created”, “Logs and files”.
+	•	One end-to-end example in Websites & domains: “Host a simple website now”
+	•	Creates /var/www/example, configures nginx or caddy, and prints the URL.
+
+⸻
+
+✅ Testing checklist (must pass)
+	•	make install finishes on Ubuntu/Debian and creates /usr/local/bin/jb.
+	•	jb launches the menu with breadcrumb and 0/P/B/Q.
+	•	0 opens README at Home and inside each area.
+	•	P previews for each action without making changes.
+	•	Re-running jb init is idempotent (“Already set up”).
+	•	jb env:list and jb env:open <name> work with a sample .env.gpg (document how to create).
+	•	CI passes shellcheck and sample bats tests.
+
+⸻
+
+📦 Deliverables
+	•	Commit all file changes with a clean, logical history.
+	•	Update README.md with a copy-paste one-liner to install and start the toolkit.
+	•	Example (replace with the real repo URL or instruct git clone && ./install.sh):
+
+curl -fsSL https://<your-repo>/install.sh | bash
+jb
+
+
+
+⸻
+
+🚫 Non-goals
+	•	Do not over-engineer permissions or security by default.
+	•	Keep “Improve security settings” available as an optional menu item only.
+	•	Do not add blockers or nags to normal flows.
+
+⸻
+
+Work style: Keep changes small and tested. Explain what you’re about to do (preview), then do it. Use plain English throughout.
+
+⸻
+
+If you want, I can also give you tiny starter stubs for install.sh, bin/jb, lib/base.sh, and bin/menu.sh so Cline has concrete templates to expand.
