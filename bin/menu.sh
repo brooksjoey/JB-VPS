@@ -423,6 +423,7 @@ show_devtools_menu() {
         echo -e "${MENU_OPTION}2)${MENU_RESET} Set up a code workspace"
         echo -e "${MENU_OPTION}3)${MENU_RESET} Pull a repo and run it"
         echo -e "${MENU_OPTION}4)${MENU_RESET} Fix log permissions"
+        echo -e "${MENU_OPTION}5)${MENU_RESET} Snapshot & push repo"
         
         show_standard_options
         
@@ -433,6 +434,7 @@ show_devtools_menu() {
             2) run_area_script "devtools" "workspace" ;;
             3) run_area_script "devtools" "repo" ;;
             4) "$JB_DIR/scripts/fix-logs.sh" ;;
+            5) run_area_script "devtools" "repo_snapshot" ;;
             0|"0") show_readme ;;
             p|P) show_preview ;;
             b|B) return ;;
