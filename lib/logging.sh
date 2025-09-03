@@ -36,7 +36,7 @@ declare -A LOG_COLORS=(
 
 # Initialize logging system
 log_init() {
-    local log_dir="$1"
+    local log_dir="${1:-${LOG_DIR:-/var/log/jb-vps}}"
     
     # Create log directory if it doesn't exist
     if [[ ! -d "$log_dir" ]]; then
@@ -45,7 +45,7 @@ log_init() {
             chmod 750 "$log_dir"
         else
             # Use user's home directory if not root
-            LOG_DIR="$HOME/.jb-vps/logs"
+            LOG_DIR="${HOME:-/tmp}/.jb-vps/logs"
             LOG_FILE="$LOG_DIR/jb-vps.log"
             AUDIT_FILE="$LOG_DIR/audit.log"
             ERROR_FILE="$LOG_DIR/error.log"
@@ -54,23 +54,23 @@ log_init() {
     fi
     
     # Initialize log files with proper permissions
-    touch "$LOG_FILE" "$AUDIT_FILE" "$ERROR_FILE"
-    chmod 640 "$LOG_FILE" "$AUDIT_FILE" "$ERROR_FILE" 2>/dev/null || true
+    touch "${LOG_FILE:-}" "${AUDIT_FILE:-}" "${ERROR_FILE:-}"
+    chmod 640 "${LOG_FILE:-}" "${AUDIT_FILE:-}" "${ERROR_FILE:-}" 2>/dev/null || true
     
     # Log system initialization
-    log_write "INFO" "SYSTEM" "Logging system initialized" "log_dir=$LOG_DIR"
+    log_write "INFO" "SYSTEM" "Logging system initialized" "log_dir=${LOG_DIR:-}"
 }
 
 # Core logging function
 log_write() {
-    local level="$1"
-    local component="$2"
-    local message="$3"
+    local level="${1:-INFO}"
+    local component="${2:-MAIN}"
+    local message="${3:-}"
     local metadata="${4:-}"
     
     # Check if log level is enabled
-    local current_level_num="${LOG_LEVELS[$LOG_LEVEL]:-2}"
-    local message_level_num="${LOG_LEVELS[$level]:-2}"
+    local current_level_num="${LOG_LEVELS[${LOG_LEVEL:-INFO}]:-2}"
+    local message_level_num="${LOG_LEVELS[${level:-INFO}]:-2}"
     
     if [[ $message_level_num -lt $current_level_num ]]; then
         return 0
@@ -82,30 +82,30 @@ log_write() {
     
     # Generate session ID if not set
     if [[ -z "${JB_SESSION_ID:-}" ]]; then
-        export JB_SESSION_ID=$(date +%s)-$$
+        export JB_SESSION_ID="$(date +%s)-$$"
     fi
     
     # Format log entry
-    local log_entry="[$timestamp] [$level] [$component] [$JB_SESSION_ID] $message"
+    local log_entry="[$timestamp] [${level}] [${component}] [${JB_SESSION_ID:-}] ${message}"
     if [[ -n "$metadata" ]]; then
         log_entry="$log_entry | $metadata"
     fi
     
     # Write to appropriate log files
-    echo "$log_entry" >> "$LOG_FILE"
+    echo "$log_entry" >> "${LOG_FILE:-}"
     
     # Write errors to error log
-    if [[ "$level" == "ERROR" || "$level" == "FATAL" ]]; then
-        echo "$log_entry" >> "$ERROR_FILE"
+    if [[ "${level}" == "ERROR" || "${level}" == "FATAL" ]]; then
+        echo "$log_entry" >> "${ERROR_FILE:-}"
     fi
     
     # Console output with colors (if terminal supports it)
     if [[ -t 1 ]]; then
-        local color="${LOG_COLORS[$level]:-}"
-        local reset="${LOG_COLORS[RESET]}"
-        printf "%b[%s] [%s] %s%b\n" "$color" "$level" "$component" "$message" "$reset"
+        local color="${LOG_COLORS[${level}]:-}"
+        local reset="${LOG_COLORS[RESET]:-}"
+        printf "%b[%s] [%s] %s%b\n" "${color:-}" "${level}" "${component}" "${message}" "${reset:-}"
     else
-        printf "[%s] [%s] %s\n" "$level" "$component" "$message"
+        printf "[%s] [%s] %s\n" "${level}" "${component}" "${message}"
     fi
     
     # Rotate logs if needed
@@ -114,42 +114,42 @@ log_write() {
 
 # Convenience logging functions
 log_trace() { 
-    local message="$1"
+    local message="${1:-}"
     local component="${2:-MAIN}"
     local metadata="${3:-}"
     log_write "TRACE" "$component" "$message" "$metadata"
 }
 
 log_debug() { 
-    local message="$1"
+    local message="${1:-}"
     local component="${2:-MAIN}"
     local metadata="${3:-}"
     log_write "DEBUG" "$component" "$message" "$metadata"
 }
 
 log_info() { 
-    local message="$1"
+    local message="${1:-}"
     local component="${2:-MAIN}"
     local metadata="${3:-}"
     log_write "INFO" "$component" "$message" "$metadata"
 }
 
 log_warn() { 
-    local message="$1"
+    local message="${1:-}"
     local component="${2:-MAIN}"
     local metadata="${3:-}"
     log_write "WARN" "$component" "$message" "$metadata"
 }
 
 log_error() { 
-    local message="$1"
+    local message="${1:-}"
     local component="${2:-MAIN}"
     local metadata="${3:-}"
     log_write "ERROR" "$component" "$message" "$metadata"
 }
 
 log_fatal() { 
-    local message="$1"
+    local message="${1:-}"
     local component="${2:-MAIN}"
     local metadata="${3:-}"
     log_write "FATAL" "$component" "$message" "$metadata"
@@ -157,16 +157,16 @@ log_fatal() {
 
 # Audit logging for security-sensitive operations
 log_audit() {
-    local action="$1"
-    local resource="$2"
-    local result="$3"
+    local action="${1:-}"
+    local resource="${2:-}"
+    local result="${3:-}"
     local details="${4:-}"
     
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
-    local user="${SUDO_USER:-$USER}"
-    local real_user="${USER}"
+    local user="${SUDO_USER:-${USER:-$(id -un 2>/dev/null || echo unknown)}}"
+    local real_user="${USER:-$(id -un 2>/dev/null || echo unknown)}"
     local pid="$$"
     local tty="${SSH_TTY:-$(tty 2>/dev/null || echo 'unknown')}"
     
@@ -175,26 +175,26 @@ log_audit() {
         audit_entry="$audit_entry DETAILS=$details"
     fi
     
-    echo "$audit_entry" >> "$AUDIT_FILE"
+    echo "$audit_entry" >> "${AUDIT_FILE:-}"
     log_info "Audit: $action on $resource -> $result" "AUDIT" "user=$user,resource=$resource"
 }
 
 # Log rotation
 log_rotate_if_needed() {
-    local file="$LOG_FILE"
+    local file="${LOG_FILE:-}"
     
     # Check if log file exists and is larger than max size
-    if [[ -f "$file" ]]; then
+    if [[ -n "$file" && -f "$file" ]]; then
         local size
         size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo 0)
         local max_bytes
         
         # Convert size notation to bytes
-        case "$LOG_MAX_SIZE" in
-            *K|*k) max_bytes=$((${LOG_MAX_SIZE%[Kk]} * 1024)) ;;
-            *M|*m) max_bytes=$((${LOG_MAX_SIZE%[Mm]} * 1024 * 1024)) ;;
-            *G|*g) max_bytes=$((${LOG_MAX_SIZE%[Gg]} * 1024 * 1024 * 1024)) ;;
-            *) max_bytes="$LOG_MAX_SIZE" ;;
+        case "${LOG_MAX_SIZE:-10M}" in
+            *K|*k) max_bytes=$(( ${LOG_MAX_SIZE%[Kk]} * 1024 )) ;;
+            *M|*m) max_bytes=$(( ${LOG_MAX_SIZE%[Mm]} * 1024 * 1024 )) ;;
+            *G|*g) max_bytes=$(( ${LOG_MAX_SIZE%[Gg]} * 1024 * 1024 * 1024 )) ;;
+            *) max_bytes="${LOG_MAX_SIZE:-10485760}" ;;
         esac
         
         if [[ $size -gt $max_bytes ]]; then
@@ -209,12 +209,13 @@ log_rotate() {
     local extension="${file##*.}"
     
     # Rotate existing files
-    for ((i=LOG_MAX_FILES-1; i>=1; i--)); do
+    local max_files="${LOG_MAX_FILES:-5}"
+    for ((i=max_files-1; i>=1; i--)); do
         local old_file="${base_name}.${i}.${extension}"
         local new_file="${base_name}.$((i+1)).${extension}"
         
         if [[ -f "$old_file" ]]; then
-            if [[ $i -eq $((LOG_MAX_FILES-1)) ]]; then
+            if [[ $i -eq $((max_files-1)) ]]; then
                 rm -f "$old_file"  # Remove oldest file
             else
                 mv "$old_file" "$new_file"
@@ -234,8 +235,8 @@ log_rotate() {
 
 # Performance logging
 log_performance() {
-    local operation="$1"
-    local start_time="$2"
+    local operation="${1:-}"
+    local start_time="${2:-}"
     local end_time="${3:-$(date +%s.%N)}"
     local metadata="${4:-}"
     
@@ -247,7 +248,7 @@ log_performance() {
 
 # Error context logging
 log_error_context() {
-    local error_msg="$1"
+    local error_msg="${1:-}"
     local exit_code="${2:-$?}"
     local line_number="${3:-${BASH_LINENO[1]:-unknown}}"
     local function_name="${4:-${FUNCNAME[2]:-main}}"
