@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Traced launcher for JB-VPS that runs the menu with bash -x
+set -euo pipefail
+
+JB_DIR="${JB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# shellcheck disable=SC1091
+source "$JB_DIR/lib/base.sh" || true
+
+TRACE_DIR="/var/lib/jb-vps/diag"
+TRACE_FILE="$TRACE_DIR/jb-trace.txt"
+
+ensure_trace_dir() {
+  if [[ ! -d "$TRACE_DIR" ]]; then
+    if command -v as_root >/dev/null 2>&1; then
+      as_root mkdir -p "$TRACE_DIR"
+      as_root chown "${USER:-$(id -un)}":"${USER:-$(id -un)}" "$TRACE_DIR" || true
+    elif [[ $EUID -eq 0 ]]; then
+      mkdir -p "$TRACE_DIR"
+    else
+      echo "Warning: cannot create $TRACE_DIR without sudo/root; attempting anyway" >&2
+      mkdir -p "$TRACE_DIR" || true
+    fi
+  fi
+  if [[ ! -f "$TRACE_FILE" ]]; then
+    : > "$TRACE_FILE" 2>/dev/null || true
+  fi
+}
+
+ensure_trace_dir
+
+echo "Launching jb menu with tracing. Trace: $TRACE_FILE"
+
+# Run with xtrace; send xtrace (stderr) to the trace file
+bash -x "$JB_DIR/bin/jb" menu 2>>"$TRACE_FILE" || true
+
+echo "Traced session finished. See: $TRACE_FILE"
+
