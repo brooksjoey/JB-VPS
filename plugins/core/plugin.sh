@@ -392,5 +392,176 @@ jb_register "config" core_config "Manage JB-VPS configuration" "config"
 # Legacy aliases for backward compatibility
 jb_register "bootstrap" core_bootstrap "Bootstrap/initialize a fresh VPS (legacy)" "core"
 
+# System doctor: checks and auto-fixes common issues
+core_doctor() {
+    local preview=false
+    if [[ "${1:-}" == "--preview" ]]; then
+        preview=true
+    fi
+
+    local repo_dir="${JB_DIR}"
+    local launcher="/usr/local/bin/jb"
+    local target="$repo_dir/bin/jb"
+    local profile="/etc/profile.d/jb-dir.sh"
+    local log_dir="/var/log/jb-vps"
+    local state_dir="/var/lib/jb-vps"
+    local log_files=("jb-vps.log" "audit.log" "error.log")
+    local desired_user="jb"
+    local desired_group="jb"
+
+    local summary=()
+    local errors=0
+
+    run_or_preview() {
+        if [[ $preview == true ]]; then
+            echo "[PREVIEW] Would run: $*"
+            return 0
+        fi
+        "$@"
+    }
+
+    as_root_or_preview() {
+        if [[ $preview == true ]]; then
+            echo "[PREVIEW] Would run as root: $*"
+            return 0
+        fi
+        as_root "$@"
+    }
+
+    # 1) Launcher symlink
+    {
+        local status
+        local current_target=""
+        if [[ -L "$launcher" ]]; then
+            current_target="$(readlink -f "$launcher" 2>/dev/null || true)"
+        fi
+        if [[ -L "$launcher" && "$current_target" == "$target" ]]; then
+            status="OK"
+        else
+            if [[ $preview == true ]]; then
+                status="WOULD FIX"
+            else
+                as_root_or_preview rm -f "$launcher" || true
+                if as_root ln -s "$target" "$launcher" 2>/dev/null; then
+                    as_root chmod 0755 "$target" 2>/dev/null || true
+                    status="FIXED"
+                else
+                    status="ERROR"
+                    ((errors++))
+                fi
+            fi
+        fi
+        summary+=("Launcher symlink: $status -> $launcher → $target")
+    }
+
+    # 2) JB_DIR persisted
+    {
+        local status
+        local want_content="# managed by jb\nexport JB_DIR=\"$repo_dir\"\n"
+        local have_ok=false
+        if [[ -f "$profile" ]]; then
+            if grep -q "^export JB_DIR=\"$repo_dir\"$" "$profile"; then
+                have_ok=true
+            fi
+        fi
+        if [[ "$have_ok" == true ]]; then
+            status="OK"
+        else
+            if [[ $preview == true ]]; then
+                status="WOULD FIX"
+            else
+                if printf "%b" "$want_content" | as_root tee "$profile" >/dev/null; then
+                    status="FIXED"
+                else
+                    status="ERROR"
+                    ((errors++))
+                fi
+            fi
+        fi
+        summary+=("JB_DIR profile: $status -> $profile")
+    }
+
+    # 3) Log dir/files
+    {
+        local status
+        local changed=false
+        # Ensure directory
+        if [[ ! -d "$log_dir" ]]; then
+            as_root_or_preview mkdir -p "$log_dir" || true
+            changed=true
+        fi
+        # Permissions on dir
+        if [[ -d "$log_dir" ]]; then
+            # shellcheck disable=SC2012
+            if [[ $(stat -c %a "$log_dir" 2>/dev/null || echo "") != "755" ]]; then
+                as_root_or_preview chmod 0755 "$log_dir" || true
+                changed=true
+            fi
+        fi
+        # Files + perms + ownership
+        for f in "${log_files[@]}"; do
+            local path="$log_dir/$f"
+            if [[ ! -f "$path" ]]; then
+                as_root_or_preview touch "$path" || true
+                changed=true
+            fi
+            if [[ $(stat -c %a "$path" 2>/dev/null || echo "") != "644" ]]; then
+                as_root_or_preview chmod 0644 "$path" || true
+                changed=true
+            fi
+            # ownership (best effort)
+            if id "$desired_user" >/dev/null 2>&1; then
+                as_root_or_preview chown "$desired_user:$desired_group" "$path" || true
+            fi
+        done
+        # Directory ownership (best effort)
+        if id "$desired_user" >/dev/null 2>&1; then
+            as_root_or_preview chown -R "$desired_user:$desired_group" "$log_dir" || true
+        fi
+        # Decide status for logs
+        if [[ $preview == true ]]; then
+            status="WOULD FIX"
+        else
+            status=$([[ "$changed" == true ]] && echo "FIXED" || echo "OK")
+        fi
+        summary+=("Log directory: $status -> $log_dir (jb-vps.log, audit.log, error.log)")
+    }
+
+    # 4) State dir
+    {
+        local status
+        local changed=false
+        if [[ ! -d "$state_dir" ]]; then
+            as_root_or_preview mkdir -p "$state_dir" || true
+            changed=true
+        fi
+        if [[ -d "$state_dir" ]]; then
+            if [[ $(stat -c %a "$state_dir" 2>/dev/null || echo "") != "755" ]]; then
+                as_root_or_preview chmod 0755 "$state_dir" || true
+                changed=true
+            fi
+        fi
+        if [[ $preview == true ]]; then
+            status="WOULD FIX"
+        else
+            status=$([[ "$changed" == true ]] && echo "FIXED" || echo "OK")
+        fi
+        summary+=("State directory: $status -> $state_dir")
+    }
+
+    echo "JB Doctor Summary"
+    echo "=================="
+    for line in "${summary[@]}"; do
+        echo "$line"
+    done
+
+    if [[ $errors -gt 0 && $preview == false ]]; then
+        return 1
+    fi
+}
+
+# Register doctor command
+jb_register "doctor" core_doctor "Check and auto-fix common JB-VPS issues" "system"
+
 # Initialize core plugin
 core_plugin_init
