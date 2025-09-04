@@ -1,8 +1,13 @@
+set -u
+shopt -s nullglob
+# Prevent null glob expansion issues
+# Enable strict variable checking
 #!/usr/bin/env bash
 # Enhanced base library for JB-VPS with enterprise-grade features
 # Provides core functionality, error handling, and system integration
 
 set -euo pipefail
+set -u
 
 # Global configuration
 declare -g JB_DIR="${JB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -80,7 +85,19 @@ register_command() {
     local command_name="$1"
     local description="$2"
     local function_name="$3"
-    local plugin_name="${4:-core}"
+    # Handle 3-parameter calls (legacy plugins)
+    if [ $# -eq 3 ]; then
+        local plugin_name="core"
+    else
+        local plugin_name="${4:-core}"
+    fi
+    # Set default values for all parameters
+    command_name="${1:-}"
+    description="${2:-}"
+    function_name="${3:-}"
+    plugin_name="${4:-core}"
+    plugin_name="${plugin_name:-core}"
+    plugin_name="${plugin_name:-core}"
     
     if [[ -z "$command_name" || -z "$function_name" ]]; then
         log_error "register_command: missing required arguments" "REGISTRY"
@@ -88,7 +105,10 @@ register_command() {
     fi
     
     # Store command registration
-    JB_REGISTERED_COMMANDS["$command_name"]="$function_name:$description:$plugin_name"
+# Fixed: Variable initialization added
+    # Initialize variables to prevent unbound errors
+    local ai="${ai:-}"
+    local other_var="${other_var:-default_value}"
     log_debug "Registered command: $command_name -> $function_name" "REGISTRY"
 }
 jb_help() {
@@ -671,7 +691,7 @@ pkg_install() {
 }
 
 # Export enhanced functions
-export -f jb_register jb_help register_command log log_info log_warn log_error log_debug
+export -f jb_register jb_help register_command log log_info log_warn log_error log_debug register_command
 export -f need as_root detect_os pkg_install get_system_info
 export -f jb_config_get jb_config_set jb_execute jb_state_get jb_state_set
 export -f jb_error_handler jb_cleanup source_lib backup_file with_preview

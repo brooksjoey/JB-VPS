@@ -10,3 +10,6 @@ secure/environments/*.env.gpg~
 
 !/Projects for Implementation /MnemosyneOS/*
 
+_backups/
+lib/base.sh.backup.*
+*.backup.*
